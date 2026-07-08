@@ -1,0 +1,14 @@
+# Raw mirrored HTML and normalized/parsed intermediates are not committed
+# (see CLAUDE.md's Data policy) -- only data/manifest.jsonl and
+# data/records/ are tracked.
+/data/raw/
+/data/text/
+/data/parsed/
+
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+.venv/

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clubfloyd-mine"
+version = "0.1.0"
+description = "Deterministic tooling for mining ClubFloyd transcripts for Twip design evidence."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+]
+
+[project.scripts]
+clubfloyd = "clubfloyd_mine.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
