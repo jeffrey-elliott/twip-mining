@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from clubfloyd_mine import (
     audit,
@@ -14,8 +15,6 @@ from clubfloyd_mine import (
     normalize,
     segment,
 )
-
-INDEX_URL = "https://allthingsjacq.com/interactive_fiction.html"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,8 +31,18 @@ def build_parser() -> argparse.ArgumentParser:
             help="Data root directory (default: ./data, or $CLUBFLOYD_DATA_ROOT)",
         )
 
-    p_discover = subparsers.add_parser("discover", help="Discover transcripts from the index page")
-    p_discover.add_argument("--index-url", default=INDEX_URL, help="ClubFloyd index page URL")
+    p_discover = subparsers.add_parser("discover", help="Discover transcripts from a saved index page")
+    p_discover.add_argument(
+        "--input",
+        type=Path,
+        required=True,
+        help="Path to a saved copy of the index page HTML (live fetching is not implemented yet)",
+    )
+    p_discover.add_argument(
+        "--index-url",
+        default=discover.INDEX_URL,
+        help="Base URL for resolving relative links and recording provenance",
+    )
     add_root_arg(p_discover)
     p_discover.set_defaults(func=discover.run)
 
