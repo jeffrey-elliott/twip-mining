@@ -20,6 +20,7 @@ from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup, Tag
 
+from clubfloyd_mine import manifest as manifest_io
 from clubfloyd_mine import paths
 from clubfloyd_mine.models import GameRef, ManifestRecord, ManifestStatus
 
@@ -116,25 +117,6 @@ def parse_index_html(
     return records
 
 
-def load_manifest(manifest_file: Path) -> dict[str, ManifestRecord]:
-    records: dict[str, ManifestRecord] = {}
-    if not manifest_file.exists():
-        return records
-    for line in manifest_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            record = ManifestRecord.model_validate_json(line)
-            records[record.id] = record
-    return records
-
-
-def write_manifest(manifest_file: Path, records: dict[str, ManifestRecord]) -> None:
-    paths.ensure_parent(manifest_file)
-    ordered = sorted(records.values(), key=lambda r: (r.year, r.id))
-    lines = [record.model_dump_json() for record in ordered]
-    manifest_file.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-
-
 def merge_discovered(
     existing: dict[str, ManifestRecord], discovered: list[ManifestRecord]
 ) -> tuple[dict[str, ManifestRecord], int]:
@@ -158,9 +140,9 @@ def run(args: argparse.Namespace) -> None:
     discovered = parse_index_html(html, base_url=args.index_url, root=args.root)
 
     manifest_file = paths.manifest_path(args.root)
-    existing = load_manifest(manifest_file)
+    existing = manifest_io.load_manifest(manifest_file)
     merged, new_count = merge_discovered(existing, discovered)
-    write_manifest(manifest_file, merged)
+    manifest_io.write_manifest(manifest_file, merged)
 
     print(
         f"discover: parsed {len(discovered)} candidate transcript(s) from {args.input}, "

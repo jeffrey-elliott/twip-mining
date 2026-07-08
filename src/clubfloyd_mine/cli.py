@@ -47,8 +47,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_discover.set_defaults(func=discover.run)
 
     p_fetch = subparsers.add_parser("fetch", help="Fetch manifest URLs to local raw HTML")
-    p_fetch.add_argument("--force", action="store_true", help="Refetch even if unchanged")
-    p_fetch.add_argument("--delay", type=float, default=2.0, help="Seconds between requests")
+    p_fetch.add_argument("--force", action="store_true", help="Refetch even if a local copy already exists")
+    p_fetch.add_argument(
+        "--delay",
+        type=float,
+        default=fetch.DEFAULT_DELAY_SECONDS,
+        help="Seconds to wait between requests (matches the source site's robots.txt Crawl-delay)",
+    )
+    p_fetch.add_argument(
+        "--user-agent",
+        default=fetch.DEFAULT_USER_AGENT,
+        help="User-Agent header sent with every request",
+    )
+    p_fetch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would be fetched without making any network requests",
+    )
     add_root_arg(p_fetch)
     p_fetch.set_defaults(func=fetch.run)
 
