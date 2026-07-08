@@ -14,6 +14,7 @@ later pass that reads the actual transcript page fills them in.
 from __future__ import annotations
 
 import argparse
+import codecs
 import re
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -25,6 +26,22 @@ from clubfloyd_mine import paths
 from clubfloyd_mine.models import GameRef, ManifestRecord, ManifestStatus
 
 INDEX_URL = "https://allthingsjacq.com/interactive_fiction.html"
+
+
+def _cp1252_for_bad_byte(error: UnicodeDecodeError) -> tuple[str, int]:
+    """Codec error handler: decode just the offending byte(s) as cp1252
+    instead of substituting U+FFFD, then resume utf-8 decoding after it.
+
+    The real index page is not uniformly encoded: it accumulated edits over
+    18 years, so most rows are UTF-8 but some individual accented names
+    (e.g. "Marius M\xfcller", "Com\xe9die") were pasted in as raw
+    cp1252/Latin-1 bytes. A single encoding choice for the whole file can't
+    get both parts right, so this repairs it byte-by-byte instead.
+    """
+    return error.object[error.start : error.end].decode("cp1252", errors="replace"), error.end
+
+
+codecs.register_error("clubfloyd_cp1252_fallback", _cp1252_for_bad_byte)
 
 # Matches transcript link basenames like "intfic_clubfloyd_20070901.html" or
 # "intfic_clubfloyd_20120403-NF.html". Group 2 is kept verbatim (not
@@ -136,7 +153,7 @@ def merge_discovered(
 
 
 def run(args: argparse.Namespace) -> None:
-    html = args.input.read_text(encoding="utf-8", errors="replace")
+    html = args.input.read_bytes().decode("utf-8", errors="clubfloyd_cp1252_fallback")
     discovered = parse_index_html(html, base_url=args.index_url, root=args.root)
     year = getattr(args, "year", None)
     if year is not None:

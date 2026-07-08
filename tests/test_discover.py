@@ -89,6 +89,29 @@ def test_raw_path_respects_custom_root():
     assert record.raw_path == "/srv/cf-data/raw/2007/20070901-nevermore/source.html"
 
 
+def test_run_decodes_mixed_utf8_and_cp1252_bytes(tmp_path):
+    # The real index page accumulated 18 years of edits: most of it is
+    # UTF-8, but some individual accented names were pasted in as raw
+    # cp1252/Latin-1 bytes (e.g. a lone 0xE9 for "\xe9" in "Com\xe9die").
+    # A naive `errors="replace"` decode would turn that byte into U+FFFD.
+    html_bytes = (
+        b'<HTML><BODY><TABLE>'
+        b'<TR><TD><a name="CF2015"></BR><B>2015</TD></TR>'
+        b'<TR><TD><A HREF="intfic_clubfloyd_20150201.html"><I>Com\xe9die</I> by Someone</A></TD></TR>'
+        b'</TABLE></BODY></HTML>'
+    )
+    input_path = tmp_path / "mixed_encoding_index.html"
+    input_path.write_bytes(html_bytes)
+
+    root = tmp_path / "data"
+    args = SimpleNamespace(input=input_path, index_url=discover.INDEX_URL, root=root, year=None)
+    discover.run(args)
+
+    manifest_text = (root / "manifest.jsonl").read_text(encoding="utf-8")
+    assert "Comédie" in manifest_text
+    assert "�" not in manifest_text
+
+
 def test_run_year_filter_only_adds_matching_year(tmp_path):
     root = tmp_path / "data"
     args = SimpleNamespace(input=FIXTURE, index_url=discover.INDEX_URL, root=root, year=2012)
