@@ -1,10 +1,94 @@
-"""Cross-check the manifest against data/raw, data/text, data/parsed, and
-data/records, reporting missing, stale, or orphaned files.
+"""Report pipeline progress and obvious-case outcome counts.
+
+Cross-checks the manifest against what's actually on disk for data/raw,
+data/text, and data/parsed (existence, not just the manifest's own status
+field, so this catches drift between the two), then applies
+classify.classify_pair_rule() to every extracted command pair to report
+the "obvious case" counts from doc/pipeline/05_classify_outcomes.md ahead
+of the LLM/human-review tiers that don't exist yet.
 """
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+
+from clubfloyd_mine import classify
+from clubfloyd_mine import manifest as manifest_io
+from clubfloyd_mine import paths
+from clubfloyd_mine.models import CommandPair, ManifestRecord, OutcomeBucket
+
+
+@dataclass
+class AuditReport:
+    year: int | None
+    discovered: int = 0
+    fetched: int = 0
+    normalized: int = 0
+    extracted_commands: int = 0
+    obvious_success: int = 0
+    obvious_failure: int = 0
+    uncertain: int = 0
+
+
+def _load_pairs(record: ManifestRecord, root) -> list[CommandPair]:
+    pairs_path = paths.command_pairs_path(record.year, record.id, root)
+    if not pairs_path.exists():
+        return []
+    pairs = []
+    for line in pairs_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            pairs.append(CommandPair.model_validate_json(line))
+    return pairs
+
+
+def build_report(records: list[ManifestRecord], *, root, year: int | None) -> AuditReport:
+    report = AuditReport(year=year)
+    for record in records:
+        # Presence in the manifest at all counts as discovered, regardless
+        # of how far its status has since advanced.
+        report.discovered += 1
+        if paths.raw_html_path(record.year, record.id, root).exists():
+            report.fetched += 1
+        if paths.transcript_json_path(record.year, record.id, root).exists():
+            report.normalized += 1
+        for pair in _load_pairs(record, root):
+            report.extracted_commands += 1
+            outcome = classify.classify_pair_rule(pair)
+            if outcome is OutcomeBucket.SUCCESS:
+                report.obvious_success += 1
+            elif outcome is OutcomeBucket.PARSER_FAILURE:
+                report.obvious_failure += 1
+            else:
+                report.uncertain += 1
+    return report
+
+
+def _print_report(report: AuditReport) -> None:
+    scope = f"year {report.year}" if report.year is not None else "all years"
+    print(f"audit: {scope}")
+    print(f"  discovered pages:    {report.discovered}")
+    print(f"  fetched pages:       {report.fetched}")
+    print(f"  normalized pages:    {report.normalized}")
+    print(f"  extracted commands:  {report.extracted_commands}")
+    print(f"  obvious successes:   {report.obvious_success}")
+    print(f"  obvious failures:    {report.obvious_failure}")
+    print(f"  uncertain commands:  {report.uncertain}")
 
 
 def run(args: argparse.Namespace) -> None:
-    raise NotImplementedError("audit is not implemented yet")
+    manifest_file = paths.manifest_path(args.root)
+    records = manifest_io.load_manifest(manifest_file)
+    if not records:
+        print(f"audit: no records in {manifest_file}; run discover first")
+        return
+
+    year = getattr(args, "year", None)
+    selected = [r for r in records.values() if year is None or r.year == year]
+    if not selected:
+        scope = f"year {year}" if year is not None else "any year"
+        print(f"audit: no records found for {scope}")
+        return
+
+    report = build_report(selected, root=args.root, year=year)
+    _print_report(report)
