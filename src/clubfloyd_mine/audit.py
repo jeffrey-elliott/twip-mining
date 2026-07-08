@@ -24,10 +24,22 @@ class AuditReport:
     discovered: int = 0
     fetched: int = 0
     normalized: int = 0
+    parsed: int = 0
     extracted_commands: int = 0
     obvious_success: int = 0
     obvious_failure: int = 0
     uncertain: int = 0
+
+    @property
+    def complete(self) -> bool:
+        """True when every discovered record has made it all the way through
+        fetch/normalize/extract-pairs with nothing dropped along the way.
+
+        This is the gate for trusting the pipeline enough to build on top of
+        it -- e.g. CLAUDE.md's "add tests before broad crawling" extends to
+        "don't widen scope (more years) until the current scope is clean."
+        """
+        return self.discovered > 0 and self.discovered == self.fetched == self.normalized == self.parsed
 
 
 def _load_pairs(record: ManifestRecord, root) -> list[CommandPair]:
@@ -52,6 +64,8 @@ def build_report(records: list[ManifestRecord], *, root, year: int | None) -> Au
             report.fetched += 1
         if paths.transcript_json_path(record.year, record.id, root).exists():
             report.normalized += 1
+        if paths.command_pairs_path(record.year, record.id, root).exists():
+            report.parsed += 1
         for pair in _load_pairs(record, root):
             report.extracted_commands += 1
             outcome = classify.classify_pair_rule(pair)
@@ -70,10 +84,12 @@ def _print_report(report: AuditReport) -> None:
     print(f"  discovered pages:    {report.discovered}")
     print(f"  fetched pages:       {report.fetched}")
     print(f"  normalized pages:    {report.normalized}")
+    print(f"  parsed pages:        {report.parsed}")
     print(f"  extracted commands:  {report.extracted_commands}")
     print(f"  obvious successes:   {report.obvious_success}")
     print(f"  obvious failures:    {report.obvious_failure}")
     print(f"  uncertain commands:  {report.uncertain}")
+    print(f"  result:              {'PASS' if report.complete else 'FAIL'}")
 
 
 def run(args: argparse.Namespace) -> None:
@@ -92,3 +108,5 @@ def run(args: argparse.Namespace) -> None:
 
     report = build_report(selected, root=args.root, year=year)
     _print_report(report)
+    if not report.complete:
+        raise SystemExit(1)

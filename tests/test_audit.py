@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from clubfloyd_mine import audit, manifest as manifest_io, paths
 from clubfloyd_mine.models import (
     BlockKind,
@@ -59,10 +61,12 @@ def test_build_report_counts_disk_state_and_rule_outcomes(tmp_path):
     assert report.discovered == 1
     assert report.fetched == 1
     assert report.normalized == 1
+    assert report.parsed == 1
     assert report.extracted_commands == 3
     assert report.obvious_success == 1
     assert report.obvious_failure == 1
     assert report.uncertain == 1
+    assert report.complete is True
 
 
 def test_build_report_flags_missing_files_without_relying_on_status(tmp_path):
@@ -76,37 +80,65 @@ def test_build_report_flags_missing_files_without_relying_on_status(tmp_path):
     assert report.discovered == 1
     assert report.fetched == 0
     assert report.normalized == 0
+    assert report.parsed == 0
     assert report.extracted_commands == 0
+    assert report.complete is False
+
+
+def _complete_record(source_id, year, root):
+    record = _record(source_id, year)
+    paths.ensure_parent(paths.raw_html_path(year, source_id, root)).write_text("x", encoding="utf-8")
+    paths.ensure_parent(paths.transcript_json_path(year, source_id, root)).write_text("{}", encoding="utf-8")
+    _write_pairs(record, root, [_pair(0, " Taken.", source_id=source_id)])
+    return record
 
 
 def test_run_scopes_to_requested_year(tmp_path, capsys):
     root = tmp_path / "data"
-    record_2007 = _record("a", 2007)
-    record_2025 = _record("b", 2025)
-    paths.ensure_parent(paths.raw_html_path(2007, "a", root)).write_text("x", encoding="utf-8")
+    record_2007 = _complete_record("a", 2007, root)
+    record_2025 = _record("b", 2025)  # not fetched -- must not affect the 2007-scoped report
     manifest_file = paths.manifest_path(root)
     manifest_io.write_manifest(manifest_file, {"a": record_2007, "b": record_2025})
 
     args = SimpleNamespace(root=root, year=2007)
-    audit.run(args)
+    audit.run(args)  # 2007 is complete -- must not raise
 
     out = capsys.readouterr().out
     assert "year 2007" in out
     assert "discovered pages:    1" in out
     assert "fetched pages:       1" in out
+    assert "result:              PASS" in out
 
 
 def test_run_reports_all_years_when_year_not_given(tmp_path, capsys):
     root = tmp_path / "data"
+    record_a = _complete_record("a", 2007, root)
+    record_b = _complete_record("b", 2025, root)
     manifest_file = paths.manifest_path(root)
-    manifest_io.write_manifest(manifest_file, {"a": _record("a", 2007), "b": _record("b", 2025)})
+    manifest_io.write_manifest(manifest_file, {"a": record_a, "b": record_b})
 
     args = SimpleNamespace(root=root, year=None)
-    audit.run(args)
+    audit.run(args)  # both complete -- must not raise
 
     out = capsys.readouterr().out
     assert "all years" in out
     assert "discovered pages:    2" in out
+    assert "result:              PASS" in out
+
+
+def test_run_exits_nonzero_when_pipeline_is_incomplete(tmp_path, capsys):
+    root = tmp_path / "data"
+    # Discovered but never fetched -- an incomplete pipeline for this scope.
+    manifest_file = paths.manifest_path(root)
+    manifest_io.write_manifest(manifest_file, {"a": _record("a", 2007)})
+
+    args = SimpleNamespace(root=root, year=2007)
+    with pytest.raises(SystemExit) as exc_info:
+        audit.run(args)
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "result:              FAIL" in out
 
 
 def test_run_handles_empty_manifest(tmp_path, capsys):
