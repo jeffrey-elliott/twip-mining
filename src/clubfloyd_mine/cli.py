@@ -31,6 +31,14 @@ def build_parser() -> argparse.ArgumentParser:
             help="Data root directory (default: ./data, or $CLUBFLOYD_DATA_ROOT)",
         )
 
+    def add_year_arg(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument(
+            "--year",
+            type=int,
+            default=None,
+            help="Only process records from this year (default: all years in the manifest)",
+        )
+
     p_discover = subparsers.add_parser("discover", help="Discover transcripts from a saved index page")
     p_discover.add_argument(
         "--input",
@@ -43,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=discover.INDEX_URL,
         help="Base URL for resolving relative links and recording provenance",
     )
+    add_year_arg(p_discover)
     add_root_arg(p_discover)
     p_discover.set_defaults(func=discover.run)
 
@@ -64,11 +73,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report what would be fetched without making any network requests",
     )
+    add_year_arg(p_fetch)
     add_root_arg(p_fetch)
     p_fetch.set_defaults(func=fetch.run)
 
     p_normalize = subparsers.add_parser("normalize", help="Convert raw HTML to normalized transcript text/json")
     p_normalize.add_argument("--force", action="store_true", help="Re-normalize even if output exists")
+    add_year_arg(p_normalize)
     add_root_arg(p_normalize)
     p_normalize.set_defaults(func=normalize.run)
 
@@ -78,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_extract_pairs = subparsers.add_parser("extract-pairs", help="Pair commands to Floyd with their results")
     p_extract_pairs.add_argument("--force", action="store_true", help="Re-extract even if output exists")
+    add_year_arg(p_extract_pairs)
     add_root_arg(p_extract_pairs)
     p_extract_pairs.set_defaults(func=extract_pairs.run)
 
@@ -89,7 +101,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_root_arg(p_make_records)
     p_make_records.set_defaults(func=make_records.run)
 
-    p_audit = subparsers.add_parser("audit", help="Report manifest/data consistency")
+    p_audit = subparsers.add_parser("audit", help="Report pipeline progress and obvious-case outcome counts")
+    add_year_arg(p_audit)
     add_root_arg(p_audit)
     p_audit.set_defaults(func=audit.run)
 

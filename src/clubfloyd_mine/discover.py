@@ -138,6 +138,9 @@ def merge_discovered(
 def run(args: argparse.Namespace) -> None:
     html = args.input.read_text(encoding="utf-8", errors="replace")
     discovered = parse_index_html(html, base_url=args.index_url, root=args.root)
+    year = getattr(args, "year", None)
+    if year is not None:
+        discovered = [record for record in discovered if record.year == year]
 
     manifest_file = paths.manifest_path(args.root)
     existing = manifest_io.load_manifest(manifest_file)

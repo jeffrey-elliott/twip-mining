@@ -273,6 +273,32 @@ def test_run_fetches_all_records_and_advances_status(tmp_path, monkeypatch):
     assert paths.raw_html_path(record_b.year, record_b.id, root).read_bytes() == b"content b"
 
 
+def test_run_year_filter_only_touches_matching_records(tmp_path, monkeypatch):
+    record_2007 = _record("a", year=2007)
+    record_2025 = _record("b", year=2025)
+    responses = {
+        "https://example.com/robots.txt": ALLOW_ALL_ROBOTS,
+        record_2007.source_url: fetch.HttpResponse(200, b"content a"),
+    }
+    fake = FakeHttpGet(responses)
+    monkeypatch.setattr(fetch, "urllib_get", fake)
+
+    root = tmp_path / "data"
+    manifest_file = paths.manifest_path(root)
+    manifest_io.write_manifest(manifest_file, {"a": record_2007, "b": record_2025})
+
+    args = SimpleNamespace(
+        root=root, force=False, delay=0.0, user_agent="test-agent", dry_run=False, year=2007
+    )
+    fetch.run(args)
+
+    updated = manifest_io.load_manifest(manifest_file)
+    assert updated["a"].status is ManifestStatus.FETCHED
+    assert updated["b"].status is ManifestStatus.DISCOVERED  # untouched, year didn't match
+    assert record_2025.source_url not in fake.calls
+    assert not paths.raw_html_path(record_2025.year, record_2025.id, root).exists()
+
+
 def test_run_marks_discovered_record_as_error_on_failure(tmp_path, monkeypatch):
     record = _record(status=ManifestStatus.DISCOVERED)
     fake = FakeHttpGet(

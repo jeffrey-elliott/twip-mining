@@ -199,8 +199,11 @@ def run(args: argparse.Namespace) -> None:
     http_get = RateLimitedGet(urllib_get, args.delay)
     robots = RobotsCache(http_get, args.user_agent)
 
+    year = getattr(args, "year", None)
+    selected = [r for r in records.values() if year is None or r.year == year]
+
     results = []
-    for record in sorted(records.values(), key=lambda r: (r.year, r.id)):
+    for record in sorted(selected, key=lambda r: (r.year, r.id)):
         result = fetch_one(
             record,
             root=args.root,

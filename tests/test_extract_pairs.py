@@ -223,6 +223,23 @@ def test_run_advances_manifest_status(tmp_path):
     assert updated[record.id].status is ManifestStatus.PARSED
 
 
+def test_run_year_filter_only_touches_matching_records(tmp_path):
+    record_2007 = _record(source_id="20070901-nevermore", year=2007)
+    record_2025 = _record(source_id="20250101-no-more", year=2025)
+    root = tmp_path / "data"
+    _write_transcript(record_2007, root)
+    manifest_file = paths.manifest_path(root)
+    manifest_io.write_manifest(manifest_file, {record_2007.id: record_2007, record_2025.id: record_2025})
+
+    args = SimpleNamespace(root=root, force=False, year=2007)
+    extract_pairs.run(args)
+
+    updated = manifest_io.load_manifest(manifest_file)
+    assert updated[record_2007.id].status is ManifestStatus.PARSED
+    assert updated[record_2025.id].status is ManifestStatus.NORMALIZED  # untouched
+    assert not paths.command_pairs_path(record_2025.year, record_2025.id, root).exists()
+
+
 def test_run_leaves_status_alone_when_transcript_missing(tmp_path):
     record = _record(status=ManifestStatus.FETCHED)
     root = tmp_path / "data"

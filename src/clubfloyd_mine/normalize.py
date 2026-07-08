@@ -188,8 +188,11 @@ def run(args: argparse.Namespace) -> None:
         print(f"normalize: no records in {manifest_file}; run discover/fetch first")
         return
 
+    year = getattr(args, "year", None)
+    selected = [r for r in records.values() if year is None or r.year == year]
+
     results = []
-    for record in sorted(records.values(), key=lambda r: (r.year, r.id)):
+    for record in sorted(selected, key=lambda r: (r.year, r.id)):
         result = normalize_one(record, root=args.root, force=args.force)
         results.append(result)
         if result.action in ("normalized", "skipped_exists"):

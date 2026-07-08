@@ -89,6 +89,18 @@ def test_raw_path_respects_custom_root():
     assert record.raw_path == "/srv/cf-data/raw/2007/20070901-nevermore/source.html"
 
 
+def test_run_year_filter_only_adds_matching_year(tmp_path):
+    root = tmp_path / "data"
+    args = SimpleNamespace(input=FIXTURE, index_url=discover.INDEX_URL, root=root, year=2012)
+
+    discover.run(args)
+
+    manifest_file = root / "manifest.jsonl"
+    lines = manifest_file.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4  # only the 2012 records from the fixture
+    assert all('"year":2012' in line for line in lines)
+
+
 def test_run_writes_manifest_and_is_idempotent(tmp_path):
     root = tmp_path / "data"
     args = SimpleNamespace(input=FIXTURE, index_url=discover.INDEX_URL, root=root)

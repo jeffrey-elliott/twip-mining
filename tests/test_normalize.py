@@ -285,6 +285,25 @@ def test_run_advances_manifest_status(tmp_path):
     assert updated[record.id].status is ManifestStatus.NORMALIZED
 
 
+def test_run_year_filter_only_touches_matching_records(tmp_path):
+    record_2007 = _record(source_id="20070901-nevermore", year=2007, status=ManifestStatus.FETCHED)
+    record_2025 = _record(source_id="20250101-no-more", year=2025, status=ManifestStatus.FETCHED)
+    root = tmp_path / "data"
+    paths.ensure_parent(paths.raw_html_path(record_2007.year, record_2007.id, root)).write_bytes(
+        FIXTURE.read_bytes()
+    )
+    manifest_file = paths.manifest_path(root)
+    manifest_io.write_manifest(manifest_file, {record_2007.id: record_2007, record_2025.id: record_2025})
+
+    args = SimpleNamespace(root=root, force=False, year=2007)
+    normalize.run(args)
+
+    updated = manifest_io.load_manifest(manifest_file)
+    assert updated[record_2007.id].status is ManifestStatus.NORMALIZED
+    assert updated[record_2025.id].status is ManifestStatus.FETCHED  # untouched
+    assert not paths.transcript_json_path(record_2025.year, record_2025.id, root).exists()
+
+
 def test_run_leaves_status_alone_when_raw_missing(tmp_path):
     record = _record(status=ManifestStatus.DISCOVERED)
     root = tmp_path / "data"
