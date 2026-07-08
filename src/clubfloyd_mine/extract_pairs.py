@@ -2,14 +2,125 @@
 
 Reads normalized transcript blocks and writes
 data/parsed/<year>/<id>/command_pairs.jsonl.
-See doc/pipeline/04_pair_commands_to_results.md.
+See doc/pipeline/04_pair_commands_to_results.md and
+doc/club_floyd_transcript_classifier_examples.md.
+
+Pairing heuristic (from the classifier examples doc's "practical extraction
+heuristic"): each COMMAND block starts a new pair. The immediately following
+run of consecutive GAME_OUTPUT blocks is attached as that command's result;
+the run stops at the first non-GAME_OUTPUT block. A command with no
+following GAME_OUTPUT blocks (e.g. two commands sent back-to-back before
+Floyd replies, or a command as the last block in the transcript) still
+produces a pair with an empty result_blocks list -- per "invalid/unanswered
+commands are still input", it must not be dropped.
 """
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+from pathlib import Path
+
+from clubfloyd_mine import manifest as manifest_io
+from clubfloyd_mine import paths
+from clubfloyd_mine.models import (
+    BlockKind,
+    CommandPair,
+    ManifestRecord,
+    ManifestStatus,
+    Transcript,
+)
+
+
+def extract_pairs(transcript: Transcript) -> list[CommandPair]:
+    pairs: list[CommandPair] = []
+    blocks = transcript.blocks
+    i = 0
+    n = len(blocks)
+    while i < n:
+        block = blocks[i]
+        if block.kind is not BlockKind.COMMAND:
+            i += 1
+            continue
+
+        result_blocks = []
+        j = i + 1
+        while j < n and blocks[j].kind is BlockKind.GAME_OUTPUT:
+            result_blocks.append(blocks[j])
+            j += 1
+
+        pairs.append(
+            CommandPair(
+                source_id=transcript.source_id,
+                pair_index=len(pairs),
+                speaker=block.speaker,
+                addressee=block.addressee,
+                command_text=block.text,
+                result_blocks=result_blocks,
+            )
+        )
+        i = j
+    return pairs
+
+
+def _write_command_pairs(path: Path, pairs: list[CommandPair]) -> None:
+    lines = [pair.model_dump_json() for pair in pairs]
+    paths.ensure_parent(path).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+@dataclass
+class ExtractPairsResult:
+    source_id: str
+    action: str  # extracted | skipped_exists | skipped_missing_transcript | error
+    detail: str = ""
+    pair_count: int = 0
+
+
+def extract_pairs_one(
+    record: ManifestRecord, *, root: Path | str | None, force: bool
+) -> ExtractPairsResult:
+    transcript_json_path = paths.transcript_json_path(record.year, record.id, root)
+    pairs_path = paths.command_pairs_path(record.year, record.id, root)
+
+    if pairs_path.exists() and not force:
+        return ExtractPairsResult(record.id, "skipped_exists", str(pairs_path))
+
+    if not transcript_json_path.exists():
+        return ExtractPairsResult(record.id, "skipped_missing_transcript", str(transcript_json_path))
+
+    try:
+        transcript = Transcript.model_validate_json(transcript_json_path.read_text(encoding="utf-8"))
+        pairs = extract_pairs(transcript)
+    except (OSError, ValueError) as exc:
+        return ExtractPairsResult(record.id, "error", str(exc))
+
+    _write_command_pairs(pairs_path, pairs)
+    return ExtractPairsResult(record.id, "extracted", str(pairs_path), pair_count=len(pairs))
+
+
+def _print_summary(results: list[ExtractPairsResult]) -> None:
+    from collections import Counter
+
+    counts = Counter(result.action for result in results)
+    summary = ", ".join(f"{action}={count}" for action, count in sorted(counts.items()))
+    print(f"extract-pairs: processed {len(results)} record(s) -- {summary}")
+    for result in results:
+        if result.action == "error":
+            print(f"  error: {result.source_id} ({result.detail})")
 
 
 def run(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "extract-pairs is not implemented yet; see doc/pipeline/04_pair_commands_to_results.md"
-    )
+    manifest_file = paths.manifest_path(args.root)
+    records = manifest_io.load_manifest(manifest_file)
+    if not records:
+        print(f"extract-pairs: no records in {manifest_file}; run discover/fetch/normalize first")
+        return
+
+    results = []
+    for record in sorted(records.values(), key=lambda r: (r.year, r.id)):
+        result = extract_pairs_one(record, root=args.root, force=args.force)
+        results.append(result)
+        if result.action in ("extracted", "skipped_exists"):
+            records[record.id] = manifest_io.advance_status(record, ManifestStatus.PARSED)
+
+    manifest_io.write_manifest(manifest_file, records)
+    _print_summary(results)

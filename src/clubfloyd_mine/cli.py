@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_segment.set_defaults(func=segment.run)
 
     p_extract_pairs = subparsers.add_parser("extract-pairs", help="Pair commands to Floyd with their results")
+    p_extract_pairs.add_argument("--force", action="store_true", help="Re-extract even if output exists")
     add_root_arg(p_extract_pairs)
     p_extract_pairs.set_defaults(func=extract_pairs.run)
 
