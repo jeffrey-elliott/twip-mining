@@ -74,14 +74,19 @@ def test_render_index_lists_session_id_game_and_pair_count(tmp_path):
 
 
 def test_render_session_shows_command_result_and_rule_badge():
+    # Note: the CSS block in every page always contains the literal string
+    # "badge-success" etc. (it's a static stylesheet, not conditional), so
+    # asserting a badge class name is *anywhere in the page* would pass even
+    # if the pair were tagged with a completely different bucket. Assert
+    # the exact <span> markup for this pair's outcome instead.
     record = _record("a")
-    pairs = [_pair(0, " Taken.", command_text="take lamp", source_id="a")]
+    pairs = [_pair(0, " Opened.", command_text="open door", source_id="a")]
 
     html_out = view._render_session(record, pairs, outcome_filter=None)
 
-    assert "take lamp" in html_out
-    assert "Taken." in html_out
-    assert "badge-success" in html_out
+    assert "open door" in html_out
+    assert "Opened." in html_out
+    assert view._badge("success") in html_out
     assert record.source_url in html_out
 
 
@@ -91,10 +96,13 @@ def test_render_session_marks_unmatched_pairs_uncertain():
 
     html_out = view._render_session(record, pairs, outcome_filter=None)
 
-    assert "badge-uncertain" in html_out
+    assert view._badge("uncertain") in html_out
 
 
 def test_render_session_filter_excludes_non_matching_pairs():
+    # Same caveat as above: check the excluded pair's own <span> markup, not
+    # a bare substring of its command text -- "up" is short enough to
+    # coincidentally match unrelated page text (e.g. inside a CSS comment).
     record = _record("a")
     pairs = [
         _pair(0, " Opened.", command_text="open door", source_id="a"),
@@ -104,7 +112,19 @@ def test_render_session_filter_excludes_non_matching_pairs():
     html_out = view._render_session(record, pairs, outcome_filter="success")
 
     assert "open door" in html_out
-    assert "up" not in html_out
+    assert '<span class="command">&gt; up</span>' not in html_out
+
+
+def test_render_session_shows_new_rule_tier_buckets_with_their_own_badge():
+    # Guards against the filter/badge lists silently going stale when
+    # classify_pair_rule grows new buckets (see classify.py's docstring).
+    record = _record("a")
+    pairs = [_pair(0, " You already have that.", command_text="take lamp", source_id="a")]
+
+    html_out = view._render_session(record, pairs, outcome_filter=None)
+
+    assert view._badge("world_failure") in html_out
+    assert '<a href="?filter=world_failure">world_failure</a>' in html_out
 
 
 def test_render_session_escapes_html_in_transcript_text():
@@ -158,7 +178,7 @@ def test_session_route_supports_outcome_filter_query_param(tmp_path):
 
     assert status == 200
     assert "open door" in body
-    assert "up" not in body
+    assert '<span class="command">&gt; up</span>' not in body
 
 
 def test_unknown_session_returns_404(tmp_path):

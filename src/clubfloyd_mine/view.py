@@ -21,12 +21,19 @@ from urllib.parse import parse_qs, urlparse
 from clubfloyd_mine import classify, extract_pairs
 from clubfloyd_mine import manifest as manifest_io
 from clubfloyd_mine import paths
-from clubfloyd_mine.models import CommandPair, ManifestRecord
+from clubfloyd_mine.models import CommandPair, ManifestRecord, OutcomeBucket
 
 DEFAULT_PORT = 8765
 # Loopback only by default: transcript text isn't meant to be republished
 # (CLAUDE.md's data policy), so don't default to exposing it on the network.
 DEFAULT_HOST = "127.0.0.1"
+
+# "uncertain" isn't an OutcomeBucket value -- it's classify_pair_rule
+# returning None -- so it's appended here rather than living in the enum.
+# Driven off OutcomeBucket (not a hardcoded subset) so a future bucket the
+# rule tier starts producing shows up as a filter automatically instead of
+# silently having no shortcut.
+_FILTER_VALUES = [bucket.value for bucket in OutcomeBucket] + ["uncertain"]
 
 _STYLE = """
 <style>
@@ -37,9 +44,20 @@ th { background: #f4f4f4; }
 .pair { border: 1px solid #ddd; border-radius: 6px; margin: 0.75rem 0; padding: 0.6rem 0.9rem; }
 .command { font-weight: 600; font-family: monospace; }
 .result { white-space: pre-wrap; font-family: monospace; color: #333; margin: 0.4rem 0 0; }
-.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; color: white; margin-left: 0.5rem; }
+/* Default background covers any bucket without its own rule below (e.g. a
+   new one added to OutcomeBucket before this list is updated) so it still
+   reads as a badge instead of blending in unstyled. */
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; color: white; margin-left: 0.5rem; background: #616161; }
 .badge-success { background: #2e7d32; }
 .badge-parser_failure { background: #c62828; }
+.badge-world_failure { background: #ef6c00; }
+.badge-disambiguation { background: #6a1b9a; }
+.badge-clarification { background: #8e24aa; }
+.badge-inventory_change { background: #00838f; }
+.badge-location_change { background: #1565c0; }
+.badge-score_or_end_state { background: #4527a0; }
+.badge-meta_or_floyd_control { background: #37474f; }
+.badge-unknown { background: #9e9e9e; }
 .badge-uncertain { background: #9e9e9e; }
 a { color: #1565c0; }
 .filters a { margin-right: 0.75rem; }
@@ -99,9 +117,7 @@ def _render_session(record: ManifestRecord, pairs: list[CommandPair], *, outcome
             f'<pre class="result">{html.escape(result_text)}</pre>'
             "</div>"
         )
-    filter_links = " ".join(
-        f'<a href="?filter={value}">{value}</a>' for value in ("success", "parser_failure", "uncertain")
-    )
+    filter_links = " ".join(f'<a href="?filter={value}">{value}</a>' for value in _FILTER_VALUES)
     filters = f'<div class="filters">{filter_links} | <a href="?">all</a></div>'
     games = ", ".join(html.escape(g.title) for g in record.games) or "(unknown game)"
     body_pairs = "\n".join(blocks) or "<p>No pairs match this filter.</p>"
