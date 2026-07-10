@@ -65,19 +65,199 @@ def test_failure_takes_priority_over_a_coincidental_success_line():
 # --- obvious success ----------------------------------------------------------------
 
 
-def test_taken_is_obvious_success():
-    pair = _pair(" Taken.", "", " >")
+def test_opened_is_obvious_success():
+    pair = _pair(" Opened.", "", " >")
     assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
 
 
-def test_dropped_is_obvious_success():
-    pair = _pair(" Dropped.")
+def test_ok_is_obvious_success():
+    pair = _pair(" Ok.")
     assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
 
 
-def test_success_confirmation_after_a_synonym_notice_is_still_detected():
-    pair = _pair(" [grab -> take]", " Taken.", "", " >")
+def test_you_are_carrying_is_obvious_success_not_inventory_change():
+    # A listing is observational, not a mutation -- see inventory.md.
+    pair = _pair(" You are carrying:", " a brass lamp", " a rusty key", command_text="i")
     assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_find_nothing_of_interest_is_obvious_success():
+    pair = _pair(" You find nothing of interest.", command_text="search desk")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+# --- inventory change ----------------------------------------------------------------
+
+
+def test_taken_is_inventory_change():
+    pair = _pair(" Taken.", "", " >", command_text="take lamp")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.INVENTORY_CHANGE
+
+
+def test_dropped_is_inventory_change():
+    pair = _pair(" Dropped.", command_text="drop lamp")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.INVENTORY_CHANGE
+
+
+def test_inventory_change_confirmation_after_a_synonym_notice_is_still_detected():
+    pair = _pair(" [grab -> take]", " Taken.", "", " >", command_text="grab lamp")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.INVENTORY_CHANGE
+
+
+def test_removed_suffix_is_inventory_change():
+    # take.md's bulk-take confirmation format: "<item>: Removed."
+    pair = _pair(" peyote button: Removed.", " opium pipe: Removed.", command_text="take all from pallas")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.INVENTORY_CHANGE
+
+
+# --- world failure (understood, but refused for a world-state reason) ----------------
+
+
+def test_already_have_that_is_world_failure_not_parser_failure():
+    pair = _pair(" You already have that.", command_text="take lamp")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_dont_have_that_is_world_failure():
+    pair = _pair(" You don't have that.", command_text="drop lamp")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_dont_have_the_key_is_world_failure():
+    pair = _pair(" You don't have the key.", command_text="unlock door with key")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_already_open_is_world_failure():
+    pair = _pair(" That's already open.", command_text="open door")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_locked_is_world_failure():
+    pair = _pair(" It is locked.", command_text="open door")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_blocked_movement_is_world_failure():
+    pair = _pair(" The way is blocked.", command_text="north")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_world_failure_takes_priority_over_parser_failure_list():
+    # "you can't take that" (parser_failure) and "already have that"
+    # (world_failure) are different phrases; make sure adding the
+    # world_failure tier didn't disturb the parser_failure one.
+    pair = _pair(" You can't take that.", command_text="take wall")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.PARSER_FAILURE
+
+
+# --- disambiguation --------------------------------------------------------------------
+
+
+def test_which_do_you_mean_is_disambiguation():
+    pair = _pair(" Which do you mean, the opium resin or the opium pipe?", command_text="x opium")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.DISAMBIGUATION
+
+
+def test_too_many_matching_objects_is_disambiguation():
+    pair = _pair(
+        " There are far too many books to remove them all. You should select a",
+        " volume by name.",
+        command_text="take books",
+    )
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.DISAMBIGUATION
+
+
+# --- score or end state ------------------------------------------------------------------
+
+
+def test_death_marker_is_score_or_end_state():
+    pair = _pair(" *** You have died ***", " ", command_text="out")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SCORE_OR_END_STATE
+
+
+def test_game_over_is_score_or_end_state():
+    pair = _pair(" Game over.", command_text="jump")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SCORE_OR_END_STATE
+
+
+def test_bare_the_end_as_a_full_line_is_score_or_end_state():
+    pair = _pair(" The End", command_text="wait")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SCORE_OR_END_STATE
+
+
+def test_the_end_as_a_prefix_of_ordinary_prose_is_not_score_or_end_state():
+    # "the end" is deliberately exact-line-only, not a prefix, since prose
+    # like this is a plausible false positive.
+    pair = _pair(" The end of the hallway fades into darkness.", command_text="look")
+    assert classify.classify_pair_rule(pair) is None
+
+
+# --- command-based: meta_or_floyd_control -----------------------------------------------
+
+
+def test_about_command_is_meta_or_floyd_control():
+    pair = _pair(" NEVERMORE is a work of Interactive Fiction by Nate Cull.", command_text="about")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.META_OR_FLOYD_CONTROL
+
+
+def test_hint_command_is_meta_or_floyd_control():
+    pair = _pair(" Nevermore Hints", " N = next subject", command_text="hint")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.META_OR_FLOYD_CONTROL
+
+
+def test_meta_command_result_text_rule_still_wins_over_command_based_fallback():
+    # A world_failure/etc. phrase in the result should take priority over
+    # the plain command-based meta fallback.
+    pair = _pair(" You already have that.", command_text="about")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_quit_command_alone_is_not_meta_or_floyd_control():
+    # meta_quit.md: don't assume every "q"/"quit" is a real quit without a
+    # result-text confirmation prompt.
+    pair = _pair(" Study (on the velvet couch)", command_text="quit")
+    assert classify.classify_pair_rule(pair) is None
+
+
+def test_xyzzy_is_not_auto_classified():
+    # xyzzy.md: response is too game-specific to bucket by verb alone.
+    pair = _pair(" The name of old, lost magic briefly echoes, then is gone.", command_text="xyzzy")
+    assert classify.classify_pair_rule(pair) is None
+
+
+def test_again_is_not_auto_classified():
+    # again.md: outcome depends on resolving the prior command.
+    pair = _pair(" An oil-lamp of copper and glass, warm to the touch.", command_text="g")
+    assert classify.classify_pair_rule(pair) is None
+
+
+# --- command-based: location_change -----------------------------------------------------
+
+
+def test_successful_direction_command_is_location_change():
+    pair = _pair(" Hallway", " A dim, narrow hallway leads north and south.", command_text="north")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.LOCATION_CHANGE
+
+
+def test_abbreviated_direction_command_is_location_change():
+    pair = _pair(" Hallway", " A dim, narrow hallway leads north and south.", command_text="n")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.LOCATION_CHANGE
+
+
+def test_go_phrase_command_is_location_change():
+    pair = _pair(" You go through the door.", command_text="go through door")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.LOCATION_CHANGE
+
+
+def test_blocked_direction_command_is_world_failure_not_location_change():
+    pair = _pair(" You can't go that way.", command_text="north")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.PARSER_FAILURE
+
+
+def test_direction_command_with_no_result_is_uncertain():
+    pair = _pair(command_text="north")
+    assert classify.classify_pair_rule(pair) is None
 
 
 # --- uncertain (no confident rule match) ---------------------------------------------

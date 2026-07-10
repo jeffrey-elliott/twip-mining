@@ -10,13 +10,19 @@ of the LLM/human-review tiers that don't exist yet.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 
 from clubfloyd_mine import classify
 from clubfloyd_mine import extract_pairs
 from clubfloyd_mine import manifest as manifest_io
 from clubfloyd_mine import paths
-from clubfloyd_mine.models import ManifestRecord, OutcomeBucket
+from clubfloyd_mine.models import ManifestRecord
+
+# Label used for pairs classify_pair_rule left uncertain (returned None).
+# Not an OutcomeBucket value, since "uncertain" means "not yet classified",
+# not a real outcome -- see classify_pair_rule's docstring.
+UNCERTAIN = "uncertain"
 
 
 @dataclass
@@ -27,9 +33,13 @@ class AuditReport:
     normalized: int = 0
     parsed: int = 0
     extracted_commands: int = 0
-    obvious_success: int = 0
-    obvious_failure: int = 0
-    uncertain: int = 0
+    # Keyed by OutcomeBucket.value, plus UNCERTAIN for pairs
+    # classify_pair_rule returned None for. A dict (not one field per
+    # bucket) because classify_pair_rule's rule coverage grows over time
+    # (see doc/classification/examples/*.md) and this must reflect whatever
+    # buckets it actually produces without a matching audit.py edit every
+    # time.
+    rule_outcome_counts: dict[str, int] = field(default_factory=dict)
 
     @property
     def complete(self) -> bool:
@@ -45,6 +55,7 @@ class AuditReport:
 
 def build_report(records: list[ManifestRecord], *, root, year: int | None) -> AuditReport:
     report = AuditReport(year=year)
+    counts: Counter[str] = Counter()
     for record in records:
         # Presence in the manifest at all counts as discovered, regardless
         # of how far its status has since advanced.
@@ -58,12 +69,8 @@ def build_report(records: list[ManifestRecord], *, root, year: int | None) -> Au
         for pair in extract_pairs.load_command_pairs(record, root):
             report.extracted_commands += 1
             outcome = classify.classify_pair_rule(pair)
-            if outcome is OutcomeBucket.SUCCESS:
-                report.obvious_success += 1
-            elif outcome is OutcomeBucket.PARSER_FAILURE:
-                report.obvious_failure += 1
-            else:
-                report.uncertain += 1
+            counts[outcome.value if outcome is not None else UNCERTAIN] += 1
+    report.rule_outcome_counts = dict(counts)
     return report
 
 
@@ -75,9 +82,13 @@ def _print_report(report: AuditReport) -> None:
     print(f"  normalized pages:    {report.normalized}")
     print(f"  parsed pages:        {report.parsed}")
     print(f"  extracted commands:  {report.extracted_commands}")
-    print(f"  obvious successes:   {report.obvious_success}")
-    print(f"  obvious failures:    {report.obvious_failure}")
-    print(f"  uncertain commands:  {report.uncertain}")
+    # Uncertain first (the "how much is left" number), then every bucket
+    # classify_pair_rule actually produced, busiest first.
+    print(f"  uncertain commands:  {report.rule_outcome_counts.get(UNCERTAIN, 0)}")
+    for bucket, count in sorted(report.rule_outcome_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        if bucket == UNCERTAIN:
+            continue
+        print(f"  {bucket + ':':<21}{count}")
     print(f"  result:              {'PASS' if report.complete else 'FAIL'}")
 
 

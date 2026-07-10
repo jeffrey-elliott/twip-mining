@@ -37,12 +37,52 @@ verbatim across many different games, not game-specific text. Game-specific
 reimplementations of these messages (e.g. Lost Pig's "Grunk not know what
 that mean.") are deliberately left unmatched -- they fall to "uncertain"
 rather than being hardcoded one-off, which would not generalize.
+
+`classify_pair_rule` was extended using the verb-by-verb classification
+guides in doc/classification/examples/*.md, which supply two kinds of new
+signal beyond the original result-text prefix/exact-line matching:
+
+- More result-text phrase families, in priority order (first match wins):
+  score_or_end_state (death/game-over markers) > disambiguation ("which do
+  you mean") > world_failure (command was understood, but refused for a
+  world-state reason -- locked, already open, don't have the key/object)
+  > parser_failure (command/noun not understood at all) > inventory_change
+  (taken/dropped/removed-style confirmations) > generic success. The
+  world_failure/parser_failure split matters: "you can't take that" means
+  the parser didn't resolve the object, while "you already have that" or
+  "you don't have the key" mean it did, and the attempt still failed --
+  those are different buckets, not both parser_failure.
+- Command-text-based fallbacks, checked only when no result-text rule
+  matched: a fixed set of meta-verbs (about/help/hint/restart/...) that are
+  meta_or_floyd_control regardless of their (highly game-specific) output
+  text, and a fixed set of movement verbs/prefixes that become
+  location_change when they didn't already fail one of the checks above.
+  This is the first time the rule tier reads command_text, not just result
+  text -- verbs like `again`/`g` (whose outcome depends on resolving a
+  prior command) and `xyzzy` (whose response is too game-specific to bucket
+  by verb alone) are deliberately NOT included here; per those docs' own
+  cautions they stay "uncertain" rather than becoming an unreliable rule.
+
+Running the updated rules against the real corpus (`clubfloyd audit`)
+surfaced a real-data quirk in how result lines get extracted: a single
+result_blocks entry isn't always one clean physical line. normalize.py's
+game-output regex (anchored on a leading "floyd |", DOTALL) can swallow several
+"Floyd | ..." continuation lines from the source HTML into one block, so
+block.text is sometimes e.g. " Taken.\nFloyd |\nFloyd | >\n" -- one block,
+three embedded physical lines. The original exact-line matching (treating
+`block.text.strip().lower()` as one line) essentially never matched real
+data because of this; prefix matching happened to still work since it
+only needs the start of the string to line up. `_result_lines` below fixes
+this at the Pass-5 consumption site (not in normalize.py, which is a
+separate pass with its own blast radius) by splitting each block on
+newlines and stripping embedded "Floyd |" residue before matching.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import random
+import re
 from typing import Callable, Sequence
 
 from clubfloyd_mine.models import ClassificationSource, ClassifiedPair, CommandPair, OutcomeBucket
@@ -60,9 +100,18 @@ DEFAULT_LLM_SAMPLE_SIZE = 20
 # line. A prefix rather than an exact match because the standard-library
 # message is sometimes followed by extra clause text ("I only understood
 # you as far as wanting to short.") or trailing prompt characters.
+#
+# This bucket is reserved for the parser not understanding the verb/noun at
+# all. "you can't take that"/"you can't go that way" mean there's no such
+# object/exit in the parser's model of the world -- contrast with
+# _WORLD_FAILURE_PREFIXES below, where the parser understood the command
+# fine and refused it for an in-world reason (locked, already done, don't
+# have the required object).
 _OBVIOUS_FAILURE_PREFIXES = (
     "you can't see any such thing",
     "you can't go that way",
+    "you cannot go that way",
+    "there is no exit in that direction",
     "you can't ride that way",
     "you can't take that",
     "you haven't seen anything like that",
@@ -83,18 +132,89 @@ _OBVIOUS_FAILURE_PREFIXES = (
     "violence isn't the answer to this one",
 )
 
+# doc/classification/examples/{take,open,open_close,unlock,go,
+# special_blocked_move}.md: the command was understood and the target
+# resolved, but the action was refused for a world-state reason (locked,
+# already in that state, missing prerequisite, blocked by hazard). Matched
+# the same way as _OBVIOUS_FAILURE_PREFIXES (prefix, on stripped/lowercased
+# lines).
+_WORLD_FAILURE_PREFIXES = (
+    "you already have that",
+    "that's fixed in place",
+    "you can't carry any more",
+    "that's already open",
+    "it's already closed",
+    "that's already closed",
+    "it is locked",
+    "it is bolted shut",
+    "you cannot open that",
+    "it refuses to move",
+    "you can't close that",
+    "there is nothing to close",
+    "that doesn't seem to fit the lock",
+    "the door has no lock",
+    "you can't unlock that",
+    "you'll need a key",
+    "you don't have the",  # template: "you don't have the key/lamp/..."
+    "you don't have that",
+    "the door is already unlocked",
+    "the door is closed",
+    "the way is blocked",
+    "the door is locked",
+    "it is too dark",
+    "you would not chance it",
+    "you need more light",
+    "you would fall",
+    "you cannot safely proceed",
+    "darkness bars your way",
+)
+
+# doc/classification/examples/disambiguation.md: "which do you mean...?"
+# and its variants, regardless of the verb that triggered it.
+_DISAMBIGUATION_PREFIXES = (
+    "which do you mean",
+    "which one do you mean",
+    "which do you want",
+    "do you mean",
+    "did you mean",
+    "please be more specific",
+    "there are far too many",  # take.md: "There are far too many books to remove them all."
+)
+
+# doc/classification/examples/death.md's "strong markers" and post-death
+# prompt text. "the end" is matched as a full line, not a prefix, since
+# unlike the others it's short enough to risk matching ordinary prose
+# ("The end of the hallway...").
+_SCORE_OR_END_STATE_PREFIXES = (
+    "*** you have died ***",
+    "you have died",
+    "you are dead",
+    "game over",
+    "you have lost",
+    "you have failed",
+    "would you like to restart",
+    "restart, restore or quit",
+    "press any key to restart",
+    "restore a saved game",
+)
+_SCORE_OR_END_STATE_EXACT_LINES = {"the end", "the end."}
+
+# doc/classification/examples/{take,inventory}.md: taken/dropped/removed
+# mean an object moved into or out of the player's inventory -- a more
+# specific bucket than generic success. ": Removed." (e.g. "peyote button:
+# Removed.") is take.md's bulk-take confirmation format: an item name
+# followed by this suffix.
+_INVENTORY_CHANGE_LINES = {"taken.", "dropped.", "worn.", "removed."}
+_INVENTORY_CHANGE_SUFFIX = ": removed."
+
 # Matched as a full-line, case-insensitive equality: terse one-word/two-word
 # standard-library success confirmations. Deliberately exact (not prefix)
 # since these words also occur as ordinary prose elsewhere.
 _OBVIOUS_SUCCESS_LINES = {
-    "taken.",
-    "dropped.",
     "opened.",
     "closed.",
     "locked.",
     "unlocked.",
-    "worn.",
-    "removed.",
     "done.",
     "ok.",
     "saved.",
@@ -108,27 +228,115 @@ _OBVIOUS_SUCCESS_LINES = {
     "switched off.",
     "extinguished.",
     "lit.",
+    "you find nothing of interest.",  # search.md: recognized, completed, nothing found
+    "you are carrying:",  # inventory.md: a listing, not a mutation -- success, not inventory_change
 }
+
+# doc/classification/examples/meta_{about,help,hint,quit}.md, death.md:
+# command verbs whose bucket is meta_or_floyd_control almost regardless of
+# their (highly game-specific) output. Checked only as a command-text
+# fallback, after every result-text rule above has had a chance to fire --
+# per meta_about.md's own caution, a result that clearly signals something
+# else (e.g. a world_failure phrase) should win.
+#
+# Deliberately excluded: `quit`/`q` (meta_quit.md warns not to assume this
+# without a result-text confirmation prompt -- that's handled by
+# _WORLD_FAILURE/_SCORE_OR_END_STATE-style phrases instead, not here),
+# `xyzzy`/`plugh`/`plover` (xyzzy.md: response is too game-specific to
+# bucket by verb alone), and `again`/`g` (again.md: outcome depends on
+# resolving the prior command, which this single-pair classifier can't do).
+_META_COMMANDS = {
+    "about",
+    "credits",
+    "info",
+    "version",
+    "license",
+    "help",
+    "?",
+    "hint",
+    "hints",
+    "instructions",
+    "commands",
+    "restart",
+    "restore",
+}
+
+# doc/classification/examples/go.md: movement commands. Checked as a
+# command-text fallback, and only once every result-text failure/refusal
+# check above has already had a chance to catch a blocked move -- if none
+# matched and the game printed something back, treat it as a successful
+# room change. Deliberately excludes "forward"/"back" (go.md: game-specific,
+# not safe to assume) and "sit"/"stand" (not movement unless the result
+# proves otherwise, which this rule tier can't confirm).
+_MOVEMENT_COMMANDS = {
+    "n", "north", "s", "south", "e", "east", "w", "west",
+    "ne", "northeast", "nw", "northwest", "se", "southeast", "sw", "southwest",
+    "u", "up", "d", "down",
+    "in", "inside", "out", "outside", "enter", "exit", "leave",
+}
+_MOVEMENT_PREFIXES = ("go ", "walk ", "head ", "climb ", "descend ", "ascend ", "enter ", "exit ", "leave ")
+
+# Strips a leading "floyd |" (any case, optional trailing space) from a
+# physical line -- see the module docstring's note on _result_lines.
+_EMBEDDED_FLOYD_PREFIX_RE = re.compile(r"^floyd\s*\|\s?", re.IGNORECASE)
+
+
+def _result_lines(pair: CommandPair) -> list[str]:
+    """Flatten pair.result_blocks into individual physical lines, each
+    stripped and lowercased, with any embedded "Floyd |" continuation
+    residue removed. See the module docstring: a single result block isn't
+    always one clean line in real data."""
+    lines = []
+    for block in pair.result_blocks:
+        for raw_line in block.text.split("\n"):
+            line = _EMBEDDED_FLOYD_PREFIX_RE.sub("", raw_line).strip().lower()
+            if line:
+                lines.append(line)
+    return lines
 
 
 def classify_pair_rule(pair: CommandPair) -> OutcomeBucket | None:
     """Deterministic "obvious case" classifier. Returns None (uncertain)
     when no rule confidently matches -- callers must not treat that as
-    UNKNOWN, only as "not yet classified"."""
-    lines = [block.text.strip().lower() for block in pair.result_blocks if block.text.strip()]
+    UNKNOWN, only as "not yet classified". See the module docstring for the
+    priority order and its rationale."""
+    lines = _result_lines(pair)
     if not lines:
         return None
+
+    for line in lines:
+        if line in _SCORE_OR_END_STATE_EXACT_LINES or any(
+            line.startswith(prefix) for prefix in _SCORE_OR_END_STATE_PREFIXES
+        ):
+            return OutcomeBucket.SCORE_OR_END_STATE
+
+    for line in lines:
+        if any(line.startswith(prefix) for prefix in _DISAMBIGUATION_PREFIXES):
+            return OutcomeBucket.DISAMBIGUATION
+
+    for line in lines:
+        if any(line.startswith(prefix) for prefix in _WORLD_FAILURE_PREFIXES):
+            return OutcomeBucket.WORLD_FAILURE
 
     for line in lines:
         if any(line.startswith(prefix) for prefix in _OBVIOUS_FAILURE_PREFIXES):
             return OutcomeBucket.PARSER_FAILURE
 
     for line in lines:
+        if line in _INVENTORY_CHANGE_LINES or line.endswith(_INVENTORY_CHANGE_SUFFIX):
+            return OutcomeBucket.INVENTORY_CHANGE
+
+    for line in lines:
         if line in _OBVIOUS_SUCCESS_LINES:
             return OutcomeBucket.SUCCESS
 
-    return None
+    command = pair.command_text.strip().lower()
+    if command in _META_COMMANDS:
+        return OutcomeBucket.META_OR_FLOYD_CONTROL
+    if command in _MOVEMENT_COMMANDS or command.startswith(_MOVEMENT_PREFIXES):
+        return OutcomeBucket.LOCATION_CHANGE
 
+    return None
 
 
 class LlmProvenanceError(ValueError):
