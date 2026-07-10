@@ -174,6 +174,22 @@ def test_blocked_move_with_variable_object_name_is_world_failure_not_location_ch
     assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
 
 
+def test_body_part_fixed_in_place_is_world_failure():
+    # Real "The Day I Shot Hitler" wording -- see combat_loop_annotated.png.
+    pair = _pair(
+        " (first taking your moustache) That seems to be a part of yourself.",
+        command_text="remove my moustache",
+    )
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_nothing_obvious_happens_is_world_failure():
+    # Real example: understood (contrast the samba/watusi parser-failure
+    # pairs from the same transcript) but had no effect.
+    pair = _pair(" Nothing obvious happens.", command_text="pull hitler's moustache")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
 def test_world_failure_takes_priority_over_parser_failure_list():
     # "you can't take that" (parser_failure) and "already have that"
     # (world_failure) are different phrases; make sure adding the
@@ -214,6 +230,19 @@ def test_game_over_is_score_or_end_state():
 
 def test_bare_the_end_as_a_full_line_is_score_or_end_state():
     pair = _pair(" The End", command_text="wait")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SCORE_OR_END_STATE
+
+
+def test_victory_marker_is_score_or_end_state():
+    # Real "The Day I Shot Hitler" ending -- see club_floyd_midamble_annotated.png.
+    pair = _pair("      *** You have won ***", command_text="minuet")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SCORE_OR_END_STATE
+
+
+def test_invalid_answer_at_restart_menu_is_score_or_end_state():
+    # Real example: "load nazimice" typed while still stuck in the old
+    # game's RESTART/RESTORE/QUIT prompt.
+    pair = _pair(" Please give one of the answers above.", command_text="load nazimice")
     assert classify.classify_pair_rule(pair) is OutcomeBucket.SCORE_OR_END_STATE
 
 

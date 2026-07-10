@@ -199,6 +199,15 @@ _WORLD_FAILURE_PREFIXES = (
     "you cannot safely proceed",
     "darkness bars your way",
     "it seems to be locked",
+    # doc/annotated_screenshots/combat_loop_annotated.png, sourced from the
+    # real "The Day I Shot Hitler" transcript: "pull hitler's moustache" ->
+    # "Nothing obvious happens." -- a generic no-effect confirmation. The
+    # parser understood the command (contrast the samba/watusi "that noun
+    # did not make sense in this context" pairs in the same transcript,
+    # which are PARSER_FAILURE), but nothing changed and no in-world reason
+    # is given -- closest in spirit to world_failure's "understood but
+    # didn't accomplish anything" than to success.
+    "nothing obvious happens",
 )
 
 # doc/classification/examples/solvable_blocked_action.md, sourced from the
@@ -212,6 +221,13 @@ _WORLD_FAILURE_PREFIXES = (
 # prefixes keep their tighter, safer match semantics.
 _WORLD_FAILURE_SUBSTRINGS = (
     "is closed, and bars your way",
+    # doc/annotated_screenshots/combat_loop_annotated.png: "remove my
+    # moustache" -> "(first taking your moustache) That seems to be a part
+    # of yourself." -- a body-part-specific variant of the already-covered
+    # "that's fixed in place", with a variable parenthetical clause before
+    # it (same shape as the wooden-door case above), so it's matched by
+    # substring rather than startswith().
+    "that seems to be a part of yourself",
 )
 
 # doc/classification/examples/disambiguation.md: "which do you mean...?"
@@ -241,6 +257,17 @@ _SCORE_OR_END_STATE_PREFIXES = (
     "restart, restore or quit",
     "press any key to restart",
     "restore a saved game",
+    # doc/annotated_screenshots/club_floyd_midamble_annotated.png: only
+    # loss/death markers were covered before -- "The Day I Shot Hitler"'s
+    # real ending is "*** You have won ***" / "You have won.".
+    "*** you have won ***",
+    "you have won",
+    # Same source: "load nazimice" typed while still inside the old game's
+    # RESTART/RESTORE/QUIT prompt -> "Please give one of the answers
+    # above." -- an invalid answer at that same menu, not a fresh parser or
+    # world failure; grouped with "would you like to restart" above since
+    # both are about being stuck in the post-game menu.
+    "please give one of the answers above",
 )
 _SCORE_OR_END_STATE_EXACT_LINES = {"the end", "the end."}
 

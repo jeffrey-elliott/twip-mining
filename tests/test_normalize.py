@@ -68,6 +68,16 @@ def test_session_coordination_is_chatter():
         'Jacqueline says, "We\'ll keep the commentary to the channel, and the game play here."'
     )
     assert block.kind is BlockKind.DISCUSSION
+
+
+def test_hollers_extracts_speaker_like_says_and_asks():
+    # Real example: club_floyd_midamble_annotated.png -- announcing the
+    # next game. "hollers" isn't addressed to Floyd, so this is chatter,
+    # but speaker attribution should still work like it does for says/asks.
+    block = _classify('Jacqueline hollers, "Next game, Nazi Mice, starting at five past the hour!"')
+    assert block.kind is BlockKind.DISCUSSION
+    assert block.speaker == "Jacqueline"
+    assert block.text == "Next game, Nazi Mice, starting at five past the hour!"
     assert block.speaker == "Jacqueline"
 
 

@@ -47,8 +47,15 @@ _GAME_OUTPUT_RE = re.compile(r"^floyd \|(?P<text>.*)$", re.IGNORECASE | re.DOTAL
 # "says" or "asks" mid-sentence (e.g. a room description: "The sign over it
 # says, ...") can't be mistaken for a chat line -- an unbounded ".+?" here
 # matched the entire preceding sentence as a bogus "speaker".
+#
+# "hollers" (doc/annotated_screenshots/club_floyd_midamble_annotated.png:
+# "Jacqueline hollers, \"Next game, Nazi Mice...\"") is added alongside
+# says/asks -- without it this line still lands correctly in DISCUSSION via
+# _classify_row's final catch-all, but speaker/addressee extraction is lost.
+# Other MUD-emote verbs (shouts/yells/exclaims/...) are deliberately not
+# added without their own real transcript evidence.
 _SPEECH_RE = re.compile(
-    r"^(?P<speaker>[A-Za-z][A-Za-z0-9 '_-]{0,29}?)\s+(?:says|asks)\s*"
+    r"^(?P<speaker>[A-Za-z][A-Za-z0-9 '_-]{0,29}?)\s+(?:says|asks|hollers)\s*"
     r"(?:\(to\s+(?P<addressee>[^)]+)\))?\s*,?\s*(?P<text>.*)$",
     re.IGNORECASE | re.DOTALL,
 )
