@@ -127,7 +127,7 @@ def test_render_session_shows_new_rule_tier_buckets_with_their_own_badge():
     html_out = view._render_session(record, pairs, outcome_filter=None)
 
     assert view._badge("world_failure") in html_out
-    assert '<a href="?filter=world_failure">world_failure</a>' in html_out
+    assert '<a href="?filter=world_failure">world_failure (1)</a>' in html_out
 
 
 def test_render_session_escapes_html_in_transcript_text():

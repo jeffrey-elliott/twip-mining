@@ -183,6 +183,12 @@ def _render_verb_detail(verb: str, records: dict[str, ManifestRecord], root, *, 
         matches.append((label, record, pair))
 
     total = len(matches)
+    # Counted before the filter is applied so every pill shows the verb's
+    # full per-outcome breakdown regardless of which filter is active.
+    counts: dict[str, int] = {}
+    for label, _, _ in matches:
+        counts[label] = counts.get(label, 0) + 1
+
     if outcome_filter:
         matches = [m for m in matches if m[0] == outcome_filter]
     shown = len(matches)
@@ -202,8 +208,10 @@ def _render_verb_detail(verb: str, records: dict[str, ManifestRecord], root, *, 
             f'<pre class="result">{html.escape(result_text)}</pre>'
             "</div>"
         )
-    filter_links = " ".join(f'<a href="?filter={value}">{value}</a>' for value in _FILTER_VALUES)
-    filters = f'<div class="filters">{filter_links} | <a href="?">all</a></div>'
+    filter_links = " ".join(
+        f'<a href="?filter={value}">{value} ({counts.get(value, 0)})</a>' for value in _FILTER_VALUES
+    )
+    filters = f'<div class="filters">{filter_links} | <a href="?">all ({total})</a></div>'
     body_pairs = "\n".join(blocks) or "<p>No pairs match this filter.</p>"
     body = (
         '<p><a href="/verbs">&larr; all verbs</a></p>'
@@ -215,11 +223,17 @@ def _render_verb_detail(verb: str, records: dict[str, ManifestRecord], root, *, 
 
 
 def _render_session(record: ManifestRecord, pairs: list[CommandPair], *, outcome_filter: str | None) -> str:
-    blocks = []
-    shown = 0
+    labels = []
+    counts: dict[str, int] = {}
     for pair in pairs:
         outcome = classify.classify_pair_rule(pair)
         label = outcome.value if outcome else "uncertain"
+        labels.append(label)
+        counts[label] = counts.get(label, 0) + 1
+
+    blocks = []
+    shown = 0
+    for pair, label in zip(pairs, labels):
         if outcome_filter and label != outcome_filter:
             continue
         shown += 1
@@ -231,8 +245,10 @@ def _render_session(record: ManifestRecord, pairs: list[CommandPair], *, outcome
             f'<pre class="result">{html.escape(result_text)}</pre>'
             "</div>"
         )
-    filter_links = " ".join(f'<a href="?filter={value}">{value}</a>' for value in _FILTER_VALUES)
-    filters = f'<div class="filters">{filter_links} | <a href="?">all</a></div>'
+    filter_links = " ".join(
+        f'<a href="?filter={value}">{value} ({counts.get(value, 0)})</a>' for value in _FILTER_VALUES
+    )
+    filters = f'<div class="filters">{filter_links} | <a href="?">all ({len(pairs)})</a></div>'
     games = ", ".join(html.escape(g.title) for g in record.games) or "(unknown game)"
     body_pairs = "\n".join(blocks) or "<p>No pairs match this filter.</p>"
     body = (
