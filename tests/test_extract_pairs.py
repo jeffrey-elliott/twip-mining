@@ -90,16 +90,73 @@ def test_bot_meta_does_not_extend_a_result_run():
     assert [b.text for b in pairs[0].result_blocks] == ["You are carrying:"]
 
 
-def test_non_command_blocks_with_no_preceding_command_are_ignored():
+def test_discussion_with_no_command_or_game_output_produces_no_pairs():
+    transcript = Transcript(
+        source_id="x",
+        blocks=[
+            _block(BlockKind.DISCUSSION, "did we decide on Nevermore?", speaker="maga"),
+            _block(BlockKind.DISCUSSION, "yes", speaker="inky"),
+        ],
+    )
+    pairs = extract_pairs.extract_pairs(transcript)
+    assert pairs == []
+
+
+def test_leading_game_output_with_no_preceding_command_becomes_synthetic_pair():
+    # A game auto-booting with no command in front of it at all (see
+    # extract_pairs.py's module docstring) must not be silently dropped.
     transcript = Transcript(
         source_id="x",
         blocks=[
             _block(BlockKind.DISCUSSION, "did we decide on Nevermore?", speaker="maga"),
             _block(BlockKind.GAME_OUTPUT, "NEVERMORE"),
+            _block(BlockKind.GAME_OUTPUT, "An Interactive Gothic"),
         ],
     )
     pairs = extract_pairs.extract_pairs(transcript)
-    assert pairs == []
+    assert len(pairs) == 1
+    pair = pairs[0]
+    assert pair.is_leading_output is True
+    assert pair.pair_index == 0
+    assert pair.command_text == ""
+    assert pair.speaker is None
+    assert [b.text for b in pair.result_blocks] == ["NEVERMORE", "An Interactive Gothic"]
+
+
+def test_leading_game_output_pair_index_precedes_first_real_command():
+    transcript = Transcript(
+        source_id="x",
+        blocks=[
+            _block(BlockKind.GAME_OUTPUT, "NEVERMORE"),
+            _block(BlockKind.COMMAND, "about", speaker="maga", addressee="floyd"),
+            _block(BlockKind.GAME_OUTPUT, "NEVERMORE is a work of Interactive Fiction..."),
+        ],
+    )
+    pairs = extract_pairs.extract_pairs(transcript)
+    assert len(pairs) == 2
+    assert pairs[0].is_leading_output is True
+    assert pairs[0].pair_index == 0
+    assert pairs[1].is_leading_output is False
+    assert pairs[1].pair_index == 1
+    assert pairs[1].command_text == "about"
+
+
+def test_game_output_after_load_command_is_not_leading_output():
+    # club_floyd_midamble_annotated.png: a new game's boot text printed
+    # after an in-transcript "load X" command attaches as that command's
+    # own result via the normal loop -- it is not "leading" output.
+    transcript = Transcript(
+        source_id="x",
+        blocks=[
+            _block(BlockKind.COMMAND, "load nazimice", speaker="Jacqueline", addressee="floyd"),
+            _block(BlockKind.GAME_OUTPUT, "Nazi Mice"),
+        ],
+    )
+    pairs = extract_pairs.extract_pairs(transcript)
+    assert len(pairs) == 1
+    assert pairs[0].is_leading_output is False
+    assert pairs[0].command_text == "load nazimice"
+    assert [b.text for b in pairs[0].result_blocks] == ["Nazi Mice"]
 
 
 def test_pair_index_increments_across_multiple_commands():
@@ -131,9 +188,17 @@ def test_extract_pairs_against_full_fixture():
     assert lamp_pair.result_blocks, "x lamp should have game_output attached"
     assert all(b.kind is BlockKind.GAME_OUTPUT for b in lamp_pair.result_blocks)
 
-    # Every command in the transcript produces a pair, even ones the parser rejects.
+    # The fixture's NEVERMORE title screen prints before any command is
+    # ever sent, so it surfaces as a leading synthetic pair rather than
+    # being dropped.
+    assert pairs[0].is_leading_output is True
+    assert any("NEVERMORE" in b.text for b in pairs[0].result_blocks)
+
+    # Every real command in the transcript produces a pair after that,
+    # in order, even ones the parser rejects.
     command_texts = [b.text for b in transcript.blocks if b.kind is BlockKind.COMMAND]
-    assert [p.command_text for p in pairs] == command_texts
+    real_pairs = [p for p in pairs if not p.is_leading_output]
+    assert [p.command_text for p in real_pairs] == command_texts
 
 
 # --- extract_pairs_one / run orchestration ------------------------------------------

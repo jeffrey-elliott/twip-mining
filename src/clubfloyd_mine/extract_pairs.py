@@ -13,6 +13,24 @@ following GAME_OUTPUT blocks (e.g. two commands sent back-to-back before
 Floyd replies, or a command as the last block in the transcript) still
 produces a pair with an empty result_blocks list -- per "invalid/unanswered
 commands are still input", it must not be dropped.
+
+Leading game output (doc/annotated_screenshots/preamble.png +
+combat_loop_annotated.png style annotations against the real 2007-09-01
+Nevermore transcript): a game that's already loaded before the transcript
+log starts prints its title/credits/opening room description with no
+command in front of it at all -- blocks 41-60 of that transcript are
+GAME_OUTPUT sitting right after the preamble's MUD chatter, before the
+first COMMAND block ("about") anywhere. The main loop below only ever
+attaches a GAME_OUTPUT run to the COMMAND immediately before it, so this
+leading run was previously skipped one block at a time and silently
+dropped -- never written to command_pairs.jsonl, and therefore invisible to
+classify/make-records too. `extract_pairs` now emits it as a single
+synthetic pair (`is_leading_output=True`, `command_text=""`) ahead of
+pair_index 0, so it still traces back to source instead of vanishing. This
+does not apply to a game's boot text printed after an in-transcript "load
+X" command (see club_floyd_midamble_annotated.png) -- that already attaches
+correctly as `load X`'s own result via the normal loop, since `load` is a
+real preceding COMMAND block.
 """
 from __future__ import annotations
 
@@ -34,8 +52,22 @@ from clubfloyd_mine.models import (
 def extract_pairs(transcript: Transcript) -> list[CommandPair]:
     pairs: list[CommandPair] = []
     blocks = transcript.blocks
-    i = 0
     n = len(blocks)
+
+    first_command_idx = next((idx for idx, b in enumerate(blocks) if b.kind is BlockKind.COMMAND), n)
+    leading_output = [b for b in blocks[:first_command_idx] if b.kind is BlockKind.GAME_OUTPUT]
+    if leading_output:
+        pairs.append(
+            CommandPair(
+                source_id=transcript.source_id,
+                pair_index=0,
+                command_text="",
+                result_blocks=leading_output,
+                is_leading_output=True,
+            )
+        )
+
+    i = 0
     while i < n:
         block = blocks[i]
         if block.kind is not BlockKind.COMMAND:

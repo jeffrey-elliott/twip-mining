@@ -85,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_normalize.set_defaults(func=normalize.run)
 
     p_segment = subparsers.add_parser("segment", help="Split a normalized transcript into per-game segments")
+    p_segment.add_argument("--force", action="store_true", help="Re-segment even if output exists")
+    add_year_arg(p_segment)
     add_root_arg(p_segment)
     p_segment.set_defaults(func=segment.run)
 

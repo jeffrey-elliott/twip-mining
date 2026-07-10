@@ -87,6 +87,35 @@ class CommandPair(BaseModel):
     addressee: Optional[str] = None
     command_text: str
     result_blocks: list[TranscriptBlock] = Field(default_factory=list)
+    # True only for the synthetic leading pair extract_pairs.extract_pairs
+    # emits when a transcript's first GAME_OUTPUT run has no preceding
+    # COMMAND (a game auto-booting before any command was logged, e.g. a
+    # pre-loaded single-game session -- see
+    # doc/annotated_screenshots/preamble.png). command_text is "" and
+    # speaker/addressee are None in that case; every other pair leaves this
+    # at its default.
+    is_leading_output: bool = False
+
+
+class GameSegment(BaseModel):
+    """One entry in data/parsed/<year>/<id>/session.json's "segments" list
+    (segment pass output). Stores block-index ranges into the same
+    transcript.json rather than duplicating block content."""
+
+    segment_index: int
+    start_block_index: int  # inclusive, into transcript.blocks
+    end_block_index: int  # exclusive
+    # The "load X" command text that started this segment, or None for the
+    # implicit first segment when a game was already loaded before the
+    # transcript log started (no "load" anywhere in the transcript).
+    start_command: Optional[str] = None
+
+
+class SessionSegments(BaseModel):
+    """data/parsed/<year>/<id>/session.json (segment pass output)."""
+
+    source_id: str
+    segments: list[GameSegment] = Field(default_factory=list)
 
 
 class OutcomeBucket(str, Enum):
