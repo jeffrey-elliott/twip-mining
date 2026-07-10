@@ -199,6 +199,7 @@ _WORLD_FAILURE_PREFIXES = (
     "you cannot safely proceed",
     "darkness bars your way",
     "it seems to be locked",
+    "you need to be holding",  # put.md: "You need to be holding X before you can put it into something else."
     # doc/annotated_screenshots/combat_loop_annotated.png, sourced from the
     # real "The Day I Shot Hitler" transcript: "pull hitler's moustache" ->
     # "Nothing obvious happens." -- a generic no-effect confirmation. The
@@ -301,7 +302,17 @@ _OBVIOUS_SUCCESS_LINES = {
     "extinguished.",
     "lit.",
     "you find nothing of interest.",  # search.md: recognized, completed, nothing found
+    "you find nothing unusual.",  # search.md variant
+    "there is nothing hidden there.",  # search.md variant
     "you are carrying:",  # inventory.md: a listing, not a mutation -- success, not inventory_change
+    "you are carrying nothing.",  # inventory.md: the empty-inventory variant of the line above
+    # Real corpus samples (grep across all local sessions' command_pairs,
+    # not tied to one annotated screenshot): standard wait/Z confirmations,
+    # recurring across many unrelated games.
+    "time passes.",
+    "time passes...",
+    "you idle away a few moments.",
+    "you wait for a moment.",
 }
 
 # doc/classification/examples/{open,unlock}.md's own canonical examples,
@@ -316,6 +327,7 @@ _OBVIOUS_SUCCESS_LINES = {
 _SUCCESS_PREFIXES = (
     "you open the ",
     "you unlock the ",
+    "you put ",  # put.md: "You put opium resin into the opium pipe."
 )
 
 # doc/classification/examples/meta_{about,help,hint,quit}.md, death.md:
@@ -345,7 +357,39 @@ _META_COMMANDS = {
     "commands",
     "restart",
     "restore",
+    # Real corpus samples: "[previous turn undone.]" / "[can't "undo" twice
+    # in succession. sorry!]" (undo) and interpreter file-save prompts like
+    # "file to save game in >" / "enter saved game to store:" (save) -- both
+    # are interpreter/session-control mechanisms, not physical world
+    # actions, same category as restart/restore above regardless of whether
+    # the specific attempt succeeded or was refused.
+    "undo",
+    "save",
 }
+
+# doc/classification/examples/ask.md: `ask ACTOR about/for/to ...` is always
+# a recognized conversation attempt when this shape appears -- actor-not-
+# present or topic-not-understood failures are generic phrases already
+# caught by _OBVIOUS_FAILURE_PREFIXES/_WORLD_FAILURE_PREFIXES above, and
+# even "There is no reply." is evidence the command landed (ask.md: "not
+# chatter and not an unknown-command result"), not a third outcome.
+_ASK_PREFIXES = ("ask ",)
+
+# doc/classification/examples/inventory.md: `i`/`inventory`/`inv` is a
+# near-universal parser verb that's never rejected as unrecognized -- any
+# real output for it is the listing (regardless of exact phrasing, e.g. a
+# game-specific "We are carrying nothing." variant seen in real samples),
+# so a command-text fallback is safe here the same way it is for examine/
+# look, rather than chasing every game's inventory-listing phrasing as its
+# own exact-line rule.
+_INVENTORY_LISTING_COMMANDS = {"i", "inventory", "inv"}
+
+# Real corpus samples: bare Z/wait is, like inventory, a near-universal
+# parser verb -- across many unrelated games the response varies (a fixed
+# "time passes." framing line, or entirely game-specific ambient text), but
+# it is not evidenced to ever fail as unrecognized, so any real output means
+# time passed.
+_WAIT_COMMANDS = {"z", "wait"}
 
 # doc/classification/examples/go.md: movement commands. Checked as a
 # command-text fallback, and only once every result-text failure/refusal
@@ -391,6 +435,14 @@ def _result_lines(pair: CommandPair) -> list[str]:
     for block in pair.result_blocks:
         for raw_line in block.text.split("\n"):
             line = _EMBEDDED_FLOYD_PREFIX_RE.sub("", raw_line).strip().lower()
+            # A bare ">" prompt marker followed by real text with no
+            # separating space is the game's actual result glued onto the
+            # prompt char -- an echoed command always has "> " with a space
+            # (e.g. "> i"), so the no-space case is reliably the other
+            # thing. Strip just the marker so the phrase rules below can
+            # see the real text (e.g. ">you are carrying nothing.").
+            if len(line) > 1 and line[0] == ">" and line[1] != " ":
+                line = line[1:].strip()
             if line:
                 lines.append(line)
     return lines
@@ -444,6 +496,12 @@ def classify_pair_rule(pair: CommandPair) -> OutcomeBucket | None:
         # The ">" guard excludes a bare leftover prompt marker (see
         # _result_lines' docstring) from counting as "prose was returned" --
         # that's not a description, just a rendering artifact.
+        return OutcomeBucket.SUCCESS
+    if (
+        command in _INVENTORY_LISTING_COMMANDS
+        or command in _WAIT_COMMANDS
+        or command.startswith(_ASK_PREFIXES)
+    ) and any(line != ">" for line in lines):
         return OutcomeBucket.SUCCESS
 
     return None

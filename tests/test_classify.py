@@ -556,6 +556,93 @@ def test_sample_uncertain_pairs_is_deterministic_for_a_fixed_seed():
     assert len(first) == 3
 
 
+# --- new rule-tier coverage (real corpus evidence) -----------------------------------
+
+
+def test_put_missing_inventory_precondition_is_world_failure():
+    pair = _pair(
+        " You need to be holding opium resin before you can put it into something else.",
+        command_text="put resin in pipe",
+    )
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_put_success_sentence_is_success():
+    pair = _pair(" You put opium resin into the opium pipe.", command_text="put resin in pipe")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_carrying_nothing_is_success():
+    pair = _pair(" You are carrying nothing.", command_text="i")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_search_nothing_unusual_is_success():
+    pair = _pair(" You find nothing unusual.", command_text="search desk")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_wait_time_passes_is_success():
+    pair = _pair(" Time passes.", command_text="z")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_undo_command_is_meta_or_floyd_control():
+    pair = _pair(" [Previous turn undone.]", command_text="undo")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.META_OR_FLOYD_CONTROL
+
+
+def test_save_command_is_meta_or_floyd_control():
+    pair = _pair(" File to save game in >", command_text="save")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.META_OR_FLOYD_CONTROL
+
+
+def test_ask_actor_about_topic_with_no_reply_is_success():
+    # ask.md: "There is no reply." is not chatter or an unknown-command
+    # result -- it's evidence the command landed, same bucket as a reply.
+    pair = _pair(" There is no reply.", command_text="ask raven about lenore")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_ask_actor_about_topic_with_reply_is_success():
+    pair = _pair(' The raven caws. "Nevermore!"', command_text="ask raven about key")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_ask_actor_not_present_is_still_parser_failure():
+    # Generic actor-not-found phrasing is caught by the existing
+    # obvious-failure checks before the ask fallback is ever reached.
+    pair = _pair(" You can't see any such thing.", command_text="ask raven about key")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.PARSER_FAILURE
+
+
+def test_inventory_listing_game_specific_pronoun_variant_is_success():
+    # Real corpus example: some games phrase the listing as "We are
+    # carrying..." rather than "You are carrying:" -- the bare-command
+    # fallback catches this without hardcoding every game's exact wording.
+    pair = _pair(" We are carrying nothing.", command_text="i")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_inventory_command_with_no_result_is_uncertain():
+    pair = _pair(command_text="i")
+    assert classify.classify_pair_rule(pair) is None
+
+
+def test_merged_prompt_prefix_is_stripped_before_matching():
+    # Real corpus artifact: the result text sometimes arrives as a single
+    # line with no space between the leftover "> " prompt marker and the
+    # real output, e.g. ">You are carrying nothing." -- contrast with an
+    # echoed command, which always has a space ("> i").
+    pair = _pair(">You are carrying nothing.", command_text="i")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_echoed_command_with_space_after_prompt_is_not_stripped():
+    lines = classify._result_lines(_pair("> i"))
+    assert lines == ["> i"]
+
+
 # --- LLM tier: build_llm_prompt / parse_llm_response ---------------------------------
 
 
