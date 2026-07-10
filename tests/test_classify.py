@@ -86,6 +86,20 @@ def test_find_nothing_of_interest_is_obvious_success():
     assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
 
 
+def test_you_open_the_object_sentence_is_success():
+    # Real Nevermore transcript wording (pair #119): a full-sentence
+    # confirmation with the object's name embedded, distinct from the
+    # terse invariant "Opened." already in _OBVIOUS_SUCCESS_LINES.
+    pair = _pair(" You open the wooden door.", command_text="open door")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_you_unlock_the_object_sentence_is_success():
+    # Real Nevermore transcript wording (pair #117).
+    pair = _pair(" You unlock the wooden door.", command_text="unlock door with key")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
 # --- inventory change ----------------------------------------------------------------
 
 
@@ -143,6 +157,23 @@ def test_blocked_movement_is_world_failure():
     assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
 
 
+def test_it_seems_to_be_locked_is_world_failure():
+    # Real Nevermore transcript wording (pair #116), distinct from the
+    # already-covered "it is locked." -- see solvable_blocked_action.md.
+    pair = _pair(" It seems to be locked.", command_text="open door")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
+def test_blocked_move_with_variable_object_name_is_world_failure_not_location_change():
+    # Real Nevermore transcript wording (pairs #115/#118): "the wooden door
+    # is closed" doesn't start with the door.md-documented "the door is
+    # closed" prefix, so this only matches via _WORLD_FAILURE_SUBSTRINGS.
+    # Before that fix, this fell through to the _MOVEMENT_COMMANDS fallback
+    # and was wrongly classified as location_change.
+    pair = _pair(" The wooden door is closed, and bars your way.", command_text="e")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.WORLD_FAILURE
+
+
 def test_world_failure_takes_priority_over_parser_failure_list():
     # "you can't take that" (parser_failure) and "already have that"
     # (world_failure) are different phrases; make sure adding the
@@ -188,9 +219,13 @@ def test_bare_the_end_as_a_full_line_is_score_or_end_state():
 
 def test_the_end_as_a_prefix_of_ordinary_prose_is_not_score_or_end_state():
     # "the end" is deliberately exact-line-only, not a prefix, since prose
-    # like this is a plausible false positive.
+    # like this is a plausible false positive for SCORE_OR_END_STATE. It
+    # still resolves to SUCCESS, not None: "look" falls to the
+    # examine/look command fallback below once score/end-state has been
+    # ruled out, per look_or_examine.md's "any prose back is a successful
+    # look" rule.
     pair = _pair(" The end of the hallway fades into darkness.", command_text="look")
-    assert classify.classify_pair_rule(pair) is None
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
 
 
 # --- command-based: meta_or_floyd_control -----------------------------------------------
@@ -245,6 +280,56 @@ def test_abbreviated_direction_command_is_location_change():
     assert classify.classify_pair_rule(pair) is OutcomeBucket.LOCATION_CHANGE
 
 
+# --- command-based: examine/look (prose with no failure phrase = success) --------------
+
+
+def test_examine_self_with_prose_is_success():
+    # The exact case this was raised against: "x me" -> descriptive prose,
+    # no failure phrase anywhere in it.
+    pair = _pair(
+        " You look like a gentleman of ease, but that is not how you feel.",
+        " A staccato rap echoes through the room.",
+        " The coca rush fades, but the sense of alertness remains.",
+        command_text="x me",
+    )
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_examine_object_with_prose_is_success():
+    pair = _pair(" A thin paper envelope, of the kind in which exotic substances are stored.", command_text="examine sachet")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_look_at_object_with_prose_is_success():
+    pair = _pair(" A relic from Byzantine days, perhaps.", command_text="look at desk")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_bare_look_with_room_description_is_success():
+    pair = _pair(" Gallery", " The dust of ages clings to crooked stone walls.", command_text="look")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_abbreviated_look_with_room_description_is_success():
+    pair = _pair(" Gallery", " The dust of ages clings to crooked stone walls.", command_text="l")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_examine_target_not_found_is_parser_failure_not_success():
+    pair = _pair(" You can't see any such thing.", command_text="x unicorn")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.PARSER_FAILURE
+
+
+def test_examine_i_cant_find_that_is_parser_failure():
+    pair = _pair(" I can't find that.", command_text="x unicorn")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.PARSER_FAILURE
+
+
+def test_examine_thats_not_here_is_parser_failure():
+    pair = _pair(" That's not here.", command_text="x unicorn")
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.PARSER_FAILURE
+
+
 def test_go_phrase_command_is_location_change():
     pair = _pair(" You go through the door.", command_text="go through door")
     assert classify.classify_pair_rule(pair) is OutcomeBucket.LOCATION_CHANGE
@@ -273,18 +358,38 @@ def test_blank_only_result_is_uncertain():
     assert classify.classify_pair_rule(pair) is None
 
 
-def test_rich_descriptive_output_is_uncertain():
+def test_rich_descriptive_output_for_look_is_success_not_uncertain():
+    # look_or_examine.md: for look/examine, prose with no failure phrase
+    # *is* the successful result, not merely "uncertain" -- see the module
+    # docstring's note on _EXAMINE_OR_LOOK_COMMANDS.
     pair = _pair(
         " An oil-lamp of copper and glass, warm to the touch and old as time.",
         " Like the desk it is a family heirloom.",
+    )
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.SUCCESS
+
+
+def test_rich_descriptive_output_for_a_non_examine_verb_is_still_uncertain():
+    # The "prose with no failure phrase = success" shortcut is deliberately
+    # scoped to _EXAMINE_OR_LOOK_COMMANDS only. A manipulation verb with no
+    # rule coverage at all still can't be told apart from a custom failure
+    # message, so it stays uncertain.
+    pair = _pair(
+        " The idol wobbles unsteadily but does not fall.",
+        command_text="push idol",
     )
     assert classify.classify_pair_rule(pair) is None
 
 
 def test_game_specific_reimplemented_failure_message_is_uncertain():
     # Lost Pig's Grunk-voiced parser failure -- deliberately not hardcoded,
-    # see the module docstring.
-    pair = _pair(" Grunk not know what that mean.")
+    # see the module docstring. Uses a command outside
+    # _EXAMINE_OR_LOOK_COMMANDS on purpose: this message could plausibly
+    # follow *any* unrecognized command, and the module docstring already
+    # documents that a game reimplementing this specifically for x/examine
+    # is an accepted, undetectable blind spot of that fallback -- this test
+    # covers the general case, not that specific tradeoff.
+    pair = _pair(" Grunk not know what that mean.", command_text="pray")
     assert classify.classify_pair_rule(pair) is None
 
 
@@ -300,13 +405,15 @@ def test_against_full_fixture_snort_coke_is_obvious_failure():
     assert classify.classify_pair_rule(snort_pair) is OutcomeBucket.PARSER_FAILURE
 
     lamp_pair = next(p for p in pairs if p.command_text == "x lamp")
-    assert classify.classify_pair_rule(lamp_pair) is None  # rich descriptive text, uncertain
+    # rich descriptive text following "x lamp" -- successful examine, not
+    # uncertain, per _EXAMINE_OR_LOOK_COMMANDS.
+    assert classify.classify_pair_rule(lamp_pair) is OutcomeBucket.SUCCESS
 
 
 # --- LLM tier: classify_pair_llm / provenance verification --------------------------
 
 
-def _uncertain_pair(*result_texts, command_text="x lamp", source_id="src", pair_index=0):
+def _uncertain_pair(*result_texts, command_text="push idol", source_id="src", pair_index=0):
     pair = _pair(*result_texts, command_text=command_text)
     pair = pair.model_copy(update={"source_id": source_id, "pair_index": pair_index})
     assert classify.classify_pair_rule(pair) is None  # sanity: must be a real uncertain case
@@ -393,16 +500,18 @@ def test_classify_pair_llm_rejects_blank_evidence_strings():
 
 
 def test_sample_uncertain_pairs_excludes_already_rule_classified_pairs():
-    obvious = _pair(" Taken.")  # rule-classified as SUCCESS
-    uncertain = _pair(" An oil-lamp of copper and glass, warm to the touch.")
+    obvious = _pair(" Taken.")  # rule-classified as INVENTORY_CHANGE
+    # "push idol", not "x idol": _EXAMINE_OR_LOOK_COMMANDS would make this
+    # pair rule-classified too, defeating the point of this test.
+    uncertain = _pair(" The idol wobbles unsteadily but does not fall.", command_text="push idol")
     sampled = classify.sample_uncertain_pairs([obvious, uncertain], sample_size=10)
     assert sampled == [uncertain]
 
 
 def test_sample_uncertain_pairs_returns_all_when_sample_size_covers_them():
     pairs = [
-        _pair(" A red door.", command_text="x door"),
-        _pair(" A blue door.", command_text="x other door"),
+        _pair(" A red door.", command_text="push door"),
+        _pair(" A blue door.", command_text="push other door"),
     ]
     sampled = classify.sample_uncertain_pairs(pairs, sample_size=10)
     assert set(id(p) for p in sampled) == set(id(p) for p in pairs)
@@ -410,7 +519,7 @@ def test_sample_uncertain_pairs_returns_all_when_sample_size_covers_them():
 
 def test_sample_uncertain_pairs_is_deterministic_for_a_fixed_seed():
     pairs = [
-        _pair(f" description of item {i}.", command_text=f"x item{i}") for i in range(10)
+        _pair(f" description of item {i}.", command_text=f"push item{i}") for i in range(10)
     ]
     first = classify.sample_uncertain_pairs(pairs, sample_size=3, seed=42)
     second = classify.sample_uncertain_pairs(pairs, sample_size=3, seed=42)
@@ -424,7 +533,7 @@ def test_sample_uncertain_pairs_is_deterministic_for_a_fixed_seed():
 def test_build_llm_prompt_includes_command_and_result_text():
     pair = _uncertain_pair(" An oil-lamp of copper and glass, warm to the touch.")
     prompt = classify.build_llm_prompt(pair)
-    assert "x lamp" in prompt
+    assert "push idol" in prompt
     assert "An oil-lamp of copper and glass, warm to the touch." in prompt
     for bucket in OutcomeBucket:
         assert bucket.value in prompt

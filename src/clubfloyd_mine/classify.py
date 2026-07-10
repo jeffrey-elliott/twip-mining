@@ -76,6 +76,35 @@ only needs the start of the string to line up. `_result_lines` below fixes
 this at the Pass-5 consumption site (not in normalize.py, which is a
 separate pass with its own blast radius) by splitting each block on
 newlines and stripping embedded "Floyd |" residue before matching.
+
+A close read of pairs #115-120 of the real 2007-09-01 Nevermore transcript
+(doc/classification/examples/solvable_blocked_action.md) surfaced two more
+gaps, both fixed here: (1) `_WORLD_FAILURE_SUBSTRINGS` catches blocked-
+movement phrasing where the invariant wording doesn't start the line
+because the game inserts a variable object description first ("The wooden
+door is closed, and bars your way." vs. the door.md-documented "The door is
+closed."); without it, these pairs fell through every rule and were
+misclassified by the `_MOVEMENT_COMMANDS` fallback as a successful
+location_change even though the room never changed. (2) `_SUCCESS_PREFIXES`
+catches open.md/unlock.md's own full-sentence success confirmations ("You
+open/unlock the wooden door.") that embed the object's name, as opposed to
+the terse invariant `_OBVIOUS_SUCCESS_LINES` ("Opened.", "Unlocked.").
+
+`_EXAMINE_OR_LOOK_COMMANDS`/`_EXAMINE_OR_LOOK_PREFIXES` encode a stronger,
+deliberate claim from look_or_examine.md: for `x`/`examine`/`inspect`/`look
+at`/bare `look`, there is no third outcome beyond "the parser didn't
+resolve the target" (already caught earlier by `_OBVIOUS_FAILURE_PREFIXES`,
+e.g. "you don't see that"/"i can't find that"/"that's not here") and "here
+is a description" -- so any non-blank prose reaching this fallback *is* a
+successful examine/look, not merely "uncertain". This is a real accuracy
+tradeoff, not a free win: a game that reimplements parser failure in its
+own voice for one of these verbs specifically (the way Lost Pig's Grunk
+says "Grunk not know what that mean." generically) would be misclassified
+as a successful examine rather than staying uncertain. That's accepted
+deliberately here, on the grounds that a genuinely unresolved target is
+already covered by the failure-phrase list above for every real game seen
+so far; if a counterexample turns up, add its specific phrase to
+`_OBVIOUS_FAILURE_PREFIXES` rather than walking back this fallback.
 """
 from __future__ import annotations
 
@@ -130,6 +159,8 @@ _OBVIOUS_FAILURE_PREFIXES = (
     "you can only do that to something animate",
     "you can't think of anything to say on that topic",
     "violence isn't the answer to this one",
+    "i can't find that",
+    "that's not here",
 )
 
 # doc/classification/examples/{take,open,open_close,unlock,go,
@@ -167,6 +198,20 @@ _WORLD_FAILURE_PREFIXES = (
     "you would fall",
     "you cannot safely proceed",
     "darkness bars your way",
+    "it seems to be locked",
+)
+
+# doc/classification/examples/solvable_blocked_action.md, sourced from the
+# real 2007-09-01 Nevermore transcript (pairs #115/#118): a blocked-movement
+# message whose invariant wording doesn't start the line, because the game
+# inserts a variable object description first -- "The wooden door is closed,
+# and bars your way." vs. the door.md-documented "The door is closed."
+# _WORLD_FAILURE_PREFIXES can't catch this with startswith(); matched by
+# substring instead. Kept as its own tuple (rather than switching
+# _WORLD_FAILURE_PREFIXES to substring matching) so the existing invariant
+# prefixes keep their tighter, safer match semantics.
+_WORLD_FAILURE_SUBSTRINGS = (
+    "is closed, and bars your way",
 )
 
 # doc/classification/examples/disambiguation.md: "which do you mean...?"
@@ -232,6 +277,20 @@ _OBVIOUS_SUCCESS_LINES = {
     "you are carrying:",  # inventory.md: a listing, not a mutation -- success, not inventory_change
 }
 
+# doc/classification/examples/{open,unlock}.md's own canonical examples,
+# sourced from the real 2007-09-01 Nevermore transcript (pairs #117/#119):
+# "You open/unlock the wooden door." -- a full-sentence success confirmation
+# with the object's name embedded, unlike the terse invariant lines above.
+# Matched as a prefix (the object name and trailing punctuation vary, but
+# the verb phrase always starts the line), and safe to keep broad: any
+# refusal wording ("you can't open that", "it is locked", ...) is checked
+# earlier in classify_pair_rule's priority order and would have already
+# matched before this is reached.
+_SUCCESS_PREFIXES = (
+    "you open the ",
+    "you unlock the ",
+)
+
 # doc/classification/examples/meta_{about,help,hint,quit}.md, death.md:
 # command verbs whose bucket is meta_or_floyd_control almost regardless of
 # their (highly game-specific) output. Checked only as a command-text
@@ -276,6 +335,21 @@ _MOVEMENT_COMMANDS = {
 }
 _MOVEMENT_PREFIXES = ("go ", "walk ", "head ", "climb ", "descend ", "ascend ", "enter ", "exit ", "leave ")
 
+# doc/classification/examples/look_or_examine.md: examine/look commands.
+# Checked as a command-text fallback, same position and rationale as
+# _MOVEMENT_COMMANDS above -- every failure/refusal check runs first (in
+# particular "you can't see any such thing"/"you don't see that"/"i can't
+# find that"/"that's not here" in _OBVIOUS_FAILURE_PREFIXES, which cover the
+# parser-didn't-resolve-the-target case), so if none of those matched and
+# the game printed prose back, that prose *is* the successful examine/look
+# result -- there's no third outcome for this verb family beyond "target
+# not found" and "here's a description". Deliberately excludes "look under
+# X"/"look in X"/"search X" (search.md: a distinct, more active verb) and
+# "read X" (read.md: has its own readable/not-readable failure modes this
+# blanket rule can't safely assume).
+_EXAMINE_OR_LOOK_COMMANDS = {"look", "l"}
+_EXAMINE_OR_LOOK_PREFIXES = ("x ", "examine ", "inspect ", "look at ")
+
 # Strips a leading "floyd |" (any case, optional trailing space) from a
 # physical line -- see the module docstring's note on _result_lines.
 _EMBEDDED_FLOYD_PREFIX_RE = re.compile(r"^floyd\s*\|\s?", re.IGNORECASE)
@@ -315,7 +389,9 @@ def classify_pair_rule(pair: CommandPair) -> OutcomeBucket | None:
             return OutcomeBucket.DISAMBIGUATION
 
     for line in lines:
-        if any(line.startswith(prefix) for prefix in _WORLD_FAILURE_PREFIXES):
+        if any(line.startswith(prefix) for prefix in _WORLD_FAILURE_PREFIXES) or any(
+            substring in line for substring in _WORLD_FAILURE_SUBSTRINGS
+        ):
             return OutcomeBucket.WORLD_FAILURE
 
     for line in lines:
@@ -327,7 +403,7 @@ def classify_pair_rule(pair: CommandPair) -> OutcomeBucket | None:
             return OutcomeBucket.INVENTORY_CHANGE
 
     for line in lines:
-        if line in _OBVIOUS_SUCCESS_LINES:
+        if line in _OBVIOUS_SUCCESS_LINES or any(line.startswith(prefix) for prefix in _SUCCESS_PREFIXES):
             return OutcomeBucket.SUCCESS
 
     command = pair.command_text.strip().lower()
@@ -335,6 +411,13 @@ def classify_pair_rule(pair: CommandPair) -> OutcomeBucket | None:
         return OutcomeBucket.META_OR_FLOYD_CONTROL
     if command in _MOVEMENT_COMMANDS or command.startswith(_MOVEMENT_PREFIXES):
         return OutcomeBucket.LOCATION_CHANGE
+    if (command in _EXAMINE_OR_LOOK_COMMANDS or command.startswith(_EXAMINE_OR_LOOK_PREFIXES)) and any(
+        line != ">" for line in lines
+    ):
+        # The ">" guard excludes a bare leftover prompt marker (see
+        # _result_lines' docstring) from counting as "prose was returned" --
+        # that's not a description, just a rendering artifact.
+        return OutcomeBucket.SUCCESS
 
     return None
 

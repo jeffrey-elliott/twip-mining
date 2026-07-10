@@ -92,7 +92,10 @@ def test_render_session_shows_command_result_and_rule_badge():
 
 def test_render_session_marks_unmatched_pairs_uncertain():
     record = _record("a")
-    pairs = [_pair(0, " An oil-lamp of copper and glass.", source_id="a")]
+    # "push idol", not the default "look": _EXAMINE_OR_LOOK_COMMANDS now
+    # rule-classifies bare look/examine prose as success, so this needs a
+    # verb the rule tier genuinely can't resolve.
+    pairs = [_pair(0, " The idol wobbles unsteadily but does not fall.", command_text="push idol", source_id="a")]
 
     html_out = view._render_session(record, pairs, outcome_filter=None)
 

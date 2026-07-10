@@ -66,7 +66,7 @@ def test_build_report_counts_disk_state_and_rule_outcomes(tmp_path):
     assert report.rule_outcome_counts == {
         "inventory_change": 1,  # "Taken."
         "parser_failure": 1,  # "You can't go that way."
-        audit.UNCERTAIN: 1,  # rich descriptive oil-lamp text
+        "success": 1,  # rich descriptive oil-lamp text following "look" -- a successful look
     }
     assert report.complete is True
 
