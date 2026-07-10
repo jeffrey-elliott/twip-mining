@@ -67,6 +67,21 @@ def _write_command_pairs(path: Path, pairs: list[CommandPair]) -> None:
     paths.ensure_parent(path).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
+def load_command_pairs(record: ManifestRecord, root: Path | str | None = None) -> list[CommandPair]:
+    """Read data/parsed/<year>/<id>/command_pairs.jsonl for one manifest
+    record, or [] if extract-pairs hasn't produced it yet. Shared by any
+    pass or tool that needs to read back this pass's output (audit, view)."""
+    pairs_path = paths.command_pairs_path(record.year, record.id, root)
+    if not pairs_path.exists():
+        return []
+    pairs = []
+    for line in pairs_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            pairs.append(CommandPair.model_validate_json(line))
+    return pairs
+
+
 @dataclass
 class ExtractPairsResult:
     source_id: str

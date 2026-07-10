@@ -41,6 +41,7 @@ Each pass reads from and writes to well-defined paths. All passes must be restar
 | 6 | `clubfloyd make-records` | Classified pairs | `data/records/<category>/*.md` |
 | — | `clubfloyd audit` | manifest + data dirs | Consistency report |
 | — | `clubfloyd segment` | Normalized transcript | Per-game segments |
+| — | `clubfloyd view` | manifest + command pairs | Local read-only webpage (loopback HTTP server) |
 
 ## Data policy
 

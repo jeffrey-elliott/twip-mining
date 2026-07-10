@@ -14,6 +14,7 @@ from clubfloyd_mine import (
     make_records,
     normalize,
     segment,
+    view,
 )
 
 
@@ -105,6 +106,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_year_arg(p_audit)
     add_root_arg(p_audit)
     p_audit.set_defaults(func=audit.run)
+
+    p_view = subparsers.add_parser("view", help="Serve a local read-only webpage for browsing command pairs")
+    p_view.add_argument("--port", type=int, default=view.DEFAULT_PORT, help="Port to listen on")
+    p_view.add_argument(
+        "--host",
+        default=view.DEFAULT_HOST,
+        help="Bind address (default: loopback only, not exposed on the network)",
+    )
+    add_year_arg(p_view)
+    add_root_arg(p_view)
+    p_view.set_defaults(func=view.run)
 
     return parser
 

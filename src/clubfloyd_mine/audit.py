@@ -13,9 +13,10 @@ import argparse
 from dataclasses import dataclass
 
 from clubfloyd_mine import classify
+from clubfloyd_mine import extract_pairs
 from clubfloyd_mine import manifest as manifest_io
 from clubfloyd_mine import paths
-from clubfloyd_mine.models import CommandPair, ManifestRecord, OutcomeBucket
+from clubfloyd_mine.models import ManifestRecord, OutcomeBucket
 
 
 @dataclass
@@ -42,18 +43,6 @@ class AuditReport:
         return self.discovered > 0 and self.discovered == self.fetched == self.normalized == self.parsed
 
 
-def _load_pairs(record: ManifestRecord, root) -> list[CommandPair]:
-    pairs_path = paths.command_pairs_path(record.year, record.id, root)
-    if not pairs_path.exists():
-        return []
-    pairs = []
-    for line in pairs_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            pairs.append(CommandPair.model_validate_json(line))
-    return pairs
-
-
 def build_report(records: list[ManifestRecord], *, root, year: int | None) -> AuditReport:
     report = AuditReport(year=year)
     for record in records:
@@ -66,7 +55,7 @@ def build_report(records: list[ManifestRecord], *, root, year: int | None) -> Au
             report.normalized += 1
         if paths.command_pairs_path(record.year, record.id, root).exists():
             report.parsed += 1
-        for pair in _load_pairs(record, root):
+        for pair in extract_pairs.load_command_pairs(record, root):
             report.extracted_commands += 1
             outcome = classify.classify_pair_rule(pair)
             if outcome is OutcomeBucket.SUCCESS:
