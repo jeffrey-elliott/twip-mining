@@ -116,6 +116,11 @@ class ClassifiedPair(BaseModel):
     outcome: OutcomeBucket
     confidence: float
     classifier: ClassificationSource
+    # Verbatim quotes from the pair's own result_blocks text that justify
+    # `outcome`. Required (and verified against the source pair) for
+    # classifier=LLM; always empty for classifier=RULE, whose justification
+    # is the matched rule itself. See classify.classify_pair_llm.
+    evidence: list[str] = Field(default_factory=list)
     notes: Optional[str] = None
 
 
