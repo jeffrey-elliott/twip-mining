@@ -163,6 +163,35 @@ def test_game_output_case_insensitive_on_floyd():
     assert block.kind is BlockKind.GAME_OUTPUT
 
 
+def test_game_output_status_bar_bracket_line():
+    # Real example: data/raw/2017/20170402-a-fly-on-the-wall-or-an-appositional-eye
+    # -- the game's status bar/menu uses "Floyd ]", not "Floyd |".
+    block = _classify("Floyd ] Soul Dancers Ballroom")
+    assert block.kind is BlockKind.GAME_OUTPUT
+    assert block.text == " Soul Dancers Ballroom"
+
+
+def test_game_output_row_mixing_bracket_and_pipe_lines_stays_one_block():
+    # Real example, same session: a single row bundles several "Floyd ]"
+    # status-bar lines followed by "Floyd |" body text -- this used to fail
+    # entirely (the whole row fell through to DISCUSSION) because the old
+    # regex anchored against the whole row and required it to start with
+    # "Floyd |" specifically.
+    raw = "Floyd ] How to watch\nFloyd ] (page 1 of 1)\nFloyd |\nFloyd | In A Fly on the Wall..."
+    block = _classify(raw)
+    assert block.kind is BlockKind.GAME_OUTPUT
+    assert block.text == " How to watch\n (page 1 of 1)\n\n In A Fly on the Wall..."
+
+
+def test_game_output_row_with_one_non_matching_line_falls_through():
+    # A row that mixes a recognized Floyd-prefixed line with something else
+    # entirely isn't evidenced to be safe to reinterpret as one block, so it
+    # should fall through to the existing discussion catch-all unchanged.
+    raw = "Floyd | some text\nnot a floyd line"
+    block = _classify(raw)
+    assert block.kind is BlockKind.DISCUSSION
+
+
 # --- Bot meta --------------------------------------------------------------------------
 
 

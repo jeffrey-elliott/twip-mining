@@ -7,9 +7,18 @@ rules this implements.
 
 Core distinction (confirmed against real transcripts + the classifier
 examples doc):
-  - game_output: a line whose left prefix is exactly "Floyd |". Preserved
-    verbatim after the pipe (no stripping) -- real transcripts use leading
-    spaces for centered ASCII art (game title screens).
+  - game_output: a line whose left prefix is exactly "Floyd |" (main output
+    stream) or "Floyd ]" (the game's status-bar/menu line -- room name,
+    score/turns, paging menus -- confirmed against real transcripts, e.g.
+    data/raw/2017/20170402-a-fly-on-the-wall-or-an-appositional-eye's HELP
+    menu, which opens with several "Floyd ]" lines before its "Floyd |" body
+    text, all inside one HTML row). Classified per physical line, not per
+    whole row: a single row/td routinely bundles many original lines
+    (a whole turn's screen output) with a newline between each, and any row
+    where every line carries one of these two prefixes is one game_output
+    block. Preserved verbatim after the prefix (no stripping) -- real
+    transcripts use leading spaces for centered ASCII art (game title
+    screens).
   - command (game_input): "<speaker> says|asks (to Floyd/CF/ClubFloyd), "..."
   - bot_meta: Floyd itself speaking ("Floyd says/asks ...", with or without
     an addressee), as opposed to relaying game text via "Floyd |".
@@ -41,7 +50,11 @@ from clubfloyd_mine.models import (
 # The addressee forms that mean "this command is aimed at the game via Floyd".
 _FLOYD_ADDRESSEE_NAMES = {"floyd", "cf", "clubfloyd"}
 
-_GAME_OUTPUT_RE = re.compile(r"^floyd \|(?P<text>.*)$", re.IGNORECASE | re.DOTALL)
+# Matched per physical line (see _classify_row), not against a whole
+# (possibly multi-line) row -- a row that starts with a "Floyd ]" status-bar
+# line before its "Floyd |" body text used to fail this when it was anchored
+# against the entire row, silently dumping real game output into discussion.
+_GAME_OUTPUT_LINE_RE = re.compile(r"^floyd [|\]](?P<text>.*)$", re.IGNORECASE)
 # Speaker is bounded to name-like characters (letters/digits/spaces/apostrophes/
 # hyphens, no sentence punctuation) so prose that happens to contain the word
 # "says" or "asks" mid-sentence (e.g. a room description: "The sign over it
@@ -69,9 +82,23 @@ def _strip_wrapping_quotes(text: str) -> str:
 
 
 def _classify_row(raw_text: str) -> TranscriptBlock:
-    game_output_match = _GAME_OUTPUT_RE.match(raw_text)
-    if game_output_match:
-        return TranscriptBlock(kind=BlockKind.GAME_OUTPUT, text=game_output_match.group("text"))
+    # A row can bundle a whole turn's screen output as several newline-
+    # separated physical lines in one td (see _extract_rows). Only treat the
+    # row as one game_output block if EVERY line carries a recognized Floyd
+    # prefix -- a row with even one non-matching line isn't evidenced to be
+    # safe to reinterpret, so it falls through to the speech/discussion
+    # checks below unchanged, same as before this per-line split existed.
+    lines = raw_text.splitlines()
+    game_output_texts: list[str] | None = []
+    for line in lines:
+        match = _GAME_OUTPUT_LINE_RE.match(line)
+        if match is None:
+            game_output_texts = None
+            break
+        game_output_texts.append(match.group("text"))
+
+    if game_output_texts is not None:
+        return TranscriptBlock(kind=BlockKind.GAME_OUTPUT, text="\n".join(game_output_texts))
 
     speech_match = _SPEECH_RE.match(raw_text)
     if speech_match:
