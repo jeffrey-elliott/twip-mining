@@ -10,13 +10,22 @@ Every pair is shown with its classify.classify_pair_rule() outcome (or
 "uncertain" if the rule tier didn't match) and each session page links back
 to its manifest source_url, so the view never loses the provenance trail
 CLAUDE.md's priorities require of generated output.
+
+/verbs and /verb/<verb> give a second, cross-session way to browse the same
+data: instead of one session's pairs in transcript order, every pair across
+every loaded session with the same normalized first word (e.g. "x lamp" and
+"examine desk" both under "examine") shown together, grouped by outcome so
+same-shaped cases cluster. Seeing many real instances of one behavior side
+by side is what actually surfaces a new classify.py rule candidate -- this
+project's whole annotated-screenshot workflow so far has been a manual,
+one-transcript-at-a-time version of exactly that.
 """
 from __future__ import annotations
 
 import argparse
 import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from clubfloyd_mine import classify, extract_pairs
 from clubfloyd_mine import manifest as manifest_io
@@ -34,6 +43,21 @@ DEFAULT_HOST = "127.0.0.1"
 # rule tier starts producing shows up as a filter automatically instead of
 # silently having no shortcut.
 _FILTER_VALUES = [bucket.value for bucket in OutcomeBucket] + ["uncertain"]
+
+# Known single-letter/short abbreviations, from
+# doc/classification/examples/uncle_zarf_pd.md's "Important abbreviations"
+# list -- deliberately conservative, no unevidenced synonym merging (e.g.
+# "get"/"take" stay separate verbs here) per this project's convention of
+# not guessing synonyms without corpus evidence.
+_VERB_ALIASES = {
+    "x": "examine",
+    "l": "look",
+    "i": "inventory",
+    "z": "wait",
+    "g": "again",
+    "u": "up",
+    "d": "down",
+}
 
 _STYLE = """
 <style>
@@ -93,11 +117,101 @@ def _render_index(records: dict[str, ManifestRecord], root) -> str:
     body_rows = "\n".join(rows) or "<tr><td colspan='5'>No sessions found.</td></tr>"
     body = (
         "<h1>ClubFloyd sessions</h1>"
+        '<p><a href="/verbs">Browse commands by verb &rarr;</a></p>'
         f"<p>{len(records)} session(s) in manifest.</p>"
         "<table><thead><tr><th>Year</th><th>Session</th><th>Game(s)</th>"
         f"<th>Played</th><th>Pairs</th></tr></thead><tbody>{body_rows}</tbody></table>"
     )
     return _page("ClubFloyd sessions", body)
+
+
+def _normalize_verb(command_text: str) -> str:
+    """First whitespace-separated token of a command, lowercased, with
+    known abbreviations expanded (_VERB_ALIASES) -- e.g. "x lamp" and
+    "examine lamp" both normalize to "examine". Used to group same-behavior
+    commands together across sessions for the /verb/<verb> view. Returns
+    "" for a blank command_text (the synthetic leading-output pair from
+    extract_pairs.py -- see CommandPair.is_leading_output)."""
+    stripped = command_text.strip()
+    if not stripped:
+        return ""
+    first = stripped.split(None, 1)[0].lower()
+    return _VERB_ALIASES.get(first, first)
+
+
+def _iter_all_pairs(records: dict[str, ManifestRecord], root):
+    """Yield (record, pair) for every command pair across all given
+    records, in manifest order. Same full-disk-scan-per-request approach
+    _render_index already uses -- fine at this project's current scale (a
+    local, single-user dev tool), not meant to hold up under a full
+    650-session corpus without revisiting."""
+    for record in sorted(records.values(), key=lambda r: (r.year, r.id)):
+        for pair in extract_pairs.load_command_pairs(record, root):
+            yield record, pair
+
+
+def _render_verb_index(records: dict[str, ManifestRecord], root) -> str:
+    counts: dict[str, int] = {}
+    for _, pair in _iter_all_pairs(records, root):
+        verb = _normalize_verb(pair.command_text)
+        if verb:
+            counts[verb] = counts.get(verb, 0) + 1
+
+    rows = []
+    for verb, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        link = f'<a href="/verb/{quote(verb, safe="")}">{html.escape(verb)}</a>'
+        rows.append(f"<tr><td>{link}</td><td>{count}</td></tr>")
+    body_rows = "\n".join(rows) or "<tr><td colspan='2'>No commands found.</td></tr>"
+    body = (
+        '<p><a href="/">&larr; all sessions</a></p>'
+        "<h1>Commands by verb</h1>"
+        "<p>Every command pair across all loaded sessions, grouped by its normalized first word "
+        '(known abbreviations like "x" &rarr; "examine" are expanded) -- pick a verb to see every '
+        "instance side by side and spot classes by eye.</p>"
+        f"<table><thead><tr><th>Verb</th><th>Count</th></tr></thead><tbody>{body_rows}</tbody></table>"
+    )
+    return _page("Commands by verb", body)
+
+
+def _render_verb_detail(verb: str, records: dict[str, ManifestRecord], root, *, outcome_filter: str | None) -> str:
+    matches = []
+    for record, pair in _iter_all_pairs(records, root):
+        if _normalize_verb(pair.command_text) != verb:
+            continue
+        outcome = classify.classify_pair_rule(pair)
+        label = outcome.value if outcome else "uncertain"
+        matches.append((label, record, pair))
+
+    total = len(matches)
+    if outcome_filter:
+        matches = [m for m in matches if m[0] == outcome_filter]
+    shown = len(matches)
+
+    # Group same-outcome pairs together (rather than manifest order) so
+    # visually similar cases cluster -- that's the point of this view.
+    matches.sort(key=lambda m: (m[0], m[1].year, m[1].id, m[2].pair_index))
+
+    blocks = []
+    for label, record, pair in matches:
+        result_text = "\n".join(b.text for b in pair.result_blocks) or "(no result)"
+        session_link = f'<a href="/session/{record.year}/{html.escape(record.id)}">{html.escape(record.id)}</a>'
+        blocks.append(
+            '<div class="pair">'
+            f'<div><span class="command">&gt; {html.escape(pair.command_text)}</span>{_badge(label)}'
+            f' <span style="color:#888">{session_link} #{pair.pair_index}</span></div>'
+            f'<pre class="result">{html.escape(result_text)}</pre>'
+            "</div>"
+        )
+    filter_links = " ".join(f'<a href="?filter={value}">{value}</a>' for value in _FILTER_VALUES)
+    filters = f'<div class="filters">{filter_links} | <a href="?">all</a></div>'
+    body_pairs = "\n".join(blocks) or "<p>No pairs match this filter.</p>"
+    body = (
+        '<p><a href="/verbs">&larr; all verbs</a></p>'
+        f"<h1>&quot;{html.escape(verb)}&quot; across all sessions</h1>"
+        f"<p>{shown} of {total} pair(s) shown.</p>"
+        f"{filters}{body_pairs}"
+    )
+    return _page(f'"{verb}"', body)
 
 
 def _render_session(record: ManifestRecord, pairs: list[CommandPair], *, outcome_filter: str | None) -> str:
@@ -153,6 +267,16 @@ class _Handler(BaseHTTPRequestHandler):
 
         if not parts:
             self._send_html(200, _render_index(records, root))
+            return
+
+        if len(parts) == 1 and parts[0] == "verbs":
+            self._send_html(200, _render_verb_index(records, root))
+            return
+
+        if len(parts) == 2 and parts[0] == "verb":
+            verb = unquote(parts[1])
+            outcome_filter = query.get("filter", [None])[0]
+            self._send_html(200, _render_verb_detail(verb, records, root, outcome_filter=outcome_filter))
             return
 
         if len(parts) == 3 and parts[0] == "session":

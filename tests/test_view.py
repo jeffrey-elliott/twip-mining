@@ -140,6 +140,81 @@ def test_render_session_escapes_html_in_transcript_text():
     assert "&lt;script&gt;" in html_out
 
 
+# --- verb normalization / cross-session views -----------------------------------------
+
+
+def test_normalize_verb_expands_known_abbreviation():
+    assert view._normalize_verb("x lamp") == "examine"
+
+
+def test_normalize_verb_leaves_full_word_alone():
+    assert view._normalize_verb("examine lamp") == "examine"
+
+
+def test_normalize_verb_leaves_unmapped_verb_alone():
+    assert view._normalize_verb("take key") == "take"
+
+
+def test_normalize_verb_is_case_insensitive():
+    assert view._normalize_verb("X Lamp") == "examine"
+
+
+def test_normalize_verb_of_blank_command_is_empty_string():
+    # The synthetic leading-output pair from extract_pairs.py has
+    # command_text="" -- it shouldn't show up as a fake "" verb.
+    assert view._normalize_verb("") == ""
+
+
+def test_render_verb_index_groups_x_and_examine_under_one_count(tmp_path):
+    record = _record("a")
+    _write_pairs(
+        record,
+        tmp_path,
+        [
+            _pair(0, " An oil-lamp.", command_text="x lamp", source_id="a"),
+            _pair(1, " A writing desk.", command_text="examine desk", source_id="a"),
+            _pair(2, " Taken.", command_text="take key", source_id="a"),
+        ],
+    )
+
+    html_out = view._render_verb_index({record.id: record}, tmp_path)
+
+    assert '<a href="/verb/examine">examine</a>' in html_out
+    assert "<td>2</td>" in html_out  # two "examine"-family commands
+    assert '<a href="/verb/take">take</a>' in html_out
+
+
+def test_render_verb_detail_shows_instances_across_sessions_with_source_link(tmp_path):
+    record_a = _record("a")
+    record_b = _record("b")
+    _write_pairs(record_a, tmp_path, [_pair(0, " An oil-lamp.", command_text="x lamp", source_id="a")])
+    _write_pairs(record_b, tmp_path, [_pair(0, " A writing desk.", command_text="examine desk", source_id="b")])
+
+    html_out = view._render_verb_detail("examine", {"a": record_a, "b": record_b}, tmp_path, outcome_filter=None)
+
+    assert "x lamp" in html_out
+    assert "examine desk" in html_out
+    assert '<a href="/session/2007/a">a</a>' in html_out
+    assert '<a href="/session/2007/b">b</a>' in html_out
+
+
+def test_render_verb_detail_filter_excludes_non_matching_outcome(tmp_path):
+    record = _record("a")
+    _write_pairs(
+        record,
+        tmp_path,
+        [
+            _pair(0, " An oil-lamp.", command_text="x lamp", source_id="a"),
+            _pair(1, " You can't see any such thing.", command_text="x unicorn", source_id="a"),
+        ],
+    )
+
+    html_out = view._render_verb_detail("examine", {"a": record}, tmp_path, outcome_filter="parser_failure")
+
+    assert "x unicorn" in html_out
+    assert "x lamp" not in html_out
+
+
 # --- live server -------------------------------------------------------------------------
 
 
@@ -192,3 +267,41 @@ def test_unknown_session_returns_404(tmp_path):
             assert False, "expected HTTPError"
         except urllib.error.HTTPError as exc:
             assert exc.code == 404
+
+
+def test_verbs_route_serves_html(tmp_path):
+    record = _record("a")
+    _write_pairs(record, tmp_path, [_pair(0, " An oil-lamp.", command_text="x lamp", source_id="a")])
+
+    with _running_server(tmp_path, {"a": record}) as base_url:
+        status, body = _get(base_url, "/verbs")
+
+    assert status == 200
+    assert '<a href="/verb/examine">examine</a>' in body
+
+
+def test_verb_detail_route_serves_matching_pairs_across_sessions(tmp_path):
+    record_a = _record("a")
+    record_b = _record("b")
+    _write_pairs(record_a, tmp_path, [_pair(0, " An oil-lamp.", command_text="x lamp", source_id="a")])
+    _write_pairs(record_b, tmp_path, [_pair(0, " A writing desk.", command_text="examine desk", source_id="b")])
+
+    with _running_server(tmp_path, {"a": record_a, "b": record_b}) as base_url:
+        status, body = _get(base_url, "/verb/examine")
+
+    assert status == 200
+    assert "x lamp" in body
+    assert "examine desk" in body
+
+
+def test_verb_detail_route_handles_url_reserved_verb(tmp_path):
+    # "?" is a real meta-command verb (classify.py's _META_COMMANDS) --
+    # exercises the quote()/unquote() round-trip for a URL-reserved char.
+    record = _record("a")
+    _write_pairs(record, tmp_path, [_pair(0, " Type HINT for a hint.", command_text="?", source_id="a")])
+
+    with _running_server(tmp_path, {"a": record}) as base_url:
+        status, body = _get(base_url, "/verb/%3F")
+
+    assert status == 200
+    assert "Type HINT for a hint." in body
