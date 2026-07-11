@@ -7,18 +7,23 @@ rules this implements.
 
 Core distinction (confirmed against real transcripts + the classifier
 examples doc):
-  - game_output: a line whose left prefix is exactly "Floyd |" (main output
-    stream) or "Floyd ]" (the game's status-bar/menu line -- room name,
-    score/turns, paging menus -- confirmed against real transcripts, e.g.
-    data/raw/2017/20170402-a-fly-on-the-wall-or-an-appositional-eye's HELP
-    menu, which opens with several "Floyd ]" lines before its "Floyd |" body
-    text, all inside one HTML row). Classified per physical line, not per
-    whole row: a single row/td routinely bundles many original lines
-    (a whole turn's screen output) with a newline between each, and any row
-    where every line carries one of these two prefixes is one game_output
-    block. Preserved verbatim after the prefix (no stripping) -- real
-    transcripts use leading spaces for centered ASCII art (game title
-    screens).
+  - game_output: a line whose left prefix is exactly "Floyd |"/"Floyd ]"
+    (main output stream / status-bar-or-menu line -- room name, score/turns,
+    paging menus) or the same pair under "CF" instead of "Floyd" --
+    confirmed against real transcripts: the relay bot's name changes from
+    "Floyd" to "CF" starting around 2020 (e.g.
+    data/raw/2023/20230403-nothing-could-be-further-from-the-truth uses "CF
+    |"/"CF ]" throughout; every 2020-2025 session in this corpus does), and
+    every session from either era is otherwise internally consistent about
+    which name it uses. Classified per physical line, not per whole row: a
+    single row/td routinely bundles many original lines (a whole turn's
+    screen output) with a newline between each, and any row where every
+    non-blank line carries one of these prefixes is one game_output block --
+    a blank line (a paragraph break inside a longer description) is treated
+    as part of the block rather than breaking it, since real multi-paragraph
+    game output routinely has one between paragraphs. Preserved verbatim
+    after the prefix (no stripping) -- real transcripts use leading spaces
+    for centered ASCII art (game title screens).
   - command (game_input): "<speaker> says|asks (to Floyd/CF/ClubFloyd), "..."
   - bot_meta: Floyd itself speaking ("Floyd says/asks ...", with or without
     an addressee), as opposed to relaying game text via "Floyd |".
@@ -54,7 +59,12 @@ _FLOYD_ADDRESSEE_NAMES = {"floyd", "cf", "clubfloyd"}
 # (possibly multi-line) row -- a row that starts with a "Floyd ]" status-bar
 # line before its "Floyd |" body text used to fail this when it was anchored
 # against the entire row, silently dumping real game output into discussion.
-_GAME_OUTPUT_LINE_RE = re.compile(r"^floyd [|\]](?P<text>.*)$", re.IGNORECASE)
+# "cf" alongside "floyd": the relay bot's own name in the transcript changes
+# around 2020 (see module docstring) -- _FLOYD_ADDRESSEE_NAMES below already
+# treated "cf" as an equivalent addressee for commands, but this regex only
+# ever matched "floyd", so every 2020+ session's game output was silently
+# landing in discussion until this was noticed.
+_GAME_OUTPUT_LINE_RE = re.compile(r"^(?:floyd|cf) [|\]](?P<text>.*)$", re.IGNORECASE)
 # Speaker is bounded to name-like characters (letters/digits/spaces/apostrophes/
 # hyphens, no sentence punctuation) so prose that happens to contain the word
 # "says" or "asks" mid-sentence (e.g. a room description: "The sign over it
@@ -84,13 +94,20 @@ def _strip_wrapping_quotes(text: str) -> str:
 def _classify_row(raw_text: str) -> TranscriptBlock:
     # A row can bundle a whole turn's screen output as several newline-
     # separated physical lines in one td (see _extract_rows). Only treat the
-    # row as one game_output block if EVERY line carries a recognized Floyd
-    # prefix -- a row with even one non-matching line isn't evidenced to be
-    # safe to reinterpret, so it falls through to the speech/discussion
-    # checks below unchanged, same as before this per-line split existed.
+    # row as one game_output block if EVERY non-blank line carries a
+    # recognized prefix -- a row with even one non-matching, non-blank line
+    # isn't evidenced to be safe to reinterpret, so it falls through to the
+    # speech/discussion checks below unchanged, same as before this per-line
+    # split existed. A blank line is tolerated as-is (not required to carry
+    # its own prefix): real multi-paragraph game output routinely has one as
+    # a paragraph break -- _extract_rows already drops any row that's blank
+    # in aggregate, so an all-blank `lines` here can't happen.
     lines = raw_text.splitlines()
     game_output_texts: list[str] | None = []
     for line in lines:
+        if line.strip() == "":
+            game_output_texts.append("")
+            continue
         match = _GAME_OUTPUT_LINE_RE.match(line)
         if match is None:
             game_output_texts = None

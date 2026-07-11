@@ -192,6 +192,47 @@ def test_game_output_row_with_one_non_matching_line_falls_through():
     assert block.kind is BlockKind.DISCUSSION
 
 
+def test_game_output_row_with_blank_paragraph_break_line_stays_one_block():
+    # Real example: data/raw/2007/20070903-fear -- a homogeneous multi-line
+    # game_output row with a blank line between paragraphs used to fall
+    # through entirely to DISCUSSION, because the blank line ("") doesn't
+    # itself carry a "Floyd |" prefix and the old per-line check required
+    # every line, blank or not, to match.
+    raw = "Floyd | First paragraph.\nFloyd |\n\nFloyd | Second paragraph."
+    block = _classify(raw)
+    assert block.kind is BlockKind.GAME_OUTPUT
+    assert block.text == " First paragraph.\n\n\n Second paragraph."
+
+
+def test_game_output_cf_pipe_line():
+    # Real example: the relay bot's name changes from "Floyd" to "CF"
+    # starting around 2020 -- every session from 2020-2025 in this corpus
+    # uses "CF |"/"CF ]" instead of "Floyd |"/"Floyd ]".
+    block = _classify("CF | some text")
+    assert block.kind is BlockKind.GAME_OUTPUT
+    assert block.text == " some text"
+
+
+def test_game_output_cf_bracket_status_bar_line():
+    # Real example: data/raw/2023/20230403-nothing-could-be-further-from-the-truth
+    block = _classify("CF ] Lab Hallway Outward")
+    assert block.kind is BlockKind.GAME_OUTPUT
+    assert block.text == " Lab Hallway Outward"
+
+
+def test_game_output_cf_case_insensitive():
+    block = _classify("cf | some text")
+    assert block.kind is BlockKind.GAME_OUTPUT
+
+
+def test_game_output_row_mixing_cf_and_non_cf_line_falls_through():
+    # A row can't mix bot names and still be safely reinterpreted -- same
+    # conservative fallthrough as the Floyd-only mixed case above.
+    raw = "CF | some text\nnot a cf line"
+    block = _classify(raw)
+    assert block.kind is BlockKind.DISCUSSION
+
+
 # --- Bot meta --------------------------------------------------------------------------
 
 
