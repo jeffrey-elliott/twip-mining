@@ -17,7 +17,7 @@ from clubfloyd_mine import classify
 from clubfloyd_mine import extract_pairs
 from clubfloyd_mine import manifest as manifest_io
 from clubfloyd_mine import paths
-from clubfloyd_mine.models import ManifestRecord
+from clubfloyd_mine.models import ManifestRecord, ManifestStatus
 
 # Label used for pairs classify_pair_rule left uncertain (returned None).
 # Not an OutcomeBucket value, since "uncertain" means "not yet classified",
@@ -32,6 +32,11 @@ class AuditReport:
     fetched: int = 0
     normalized: int = 0
     parsed: int = 0
+    # Records the manifest itself marks ManifestStatus.ERROR -- e.g. a
+    # source page confirmed gone (real 404), not merely "not fetched yet".
+    # Excluded from `complete`'s expected count below: a permanently
+    # unfetchable page must not make the whole corpus report FAIL forever.
+    errored: int = 0
     extracted_commands: int = 0
     # Keyed by OutcomeBucket.value, plus UNCERTAIN for pairs
     # classify_pair_rule returned None for. A dict (not one field per
@@ -43,14 +48,19 @@ class AuditReport:
 
     @property
     def complete(self) -> bool:
-        """True when every discovered record has made it all the way through
-        fetch/normalize/extract-pairs with nothing dropped along the way.
+        """True when every discovered record that isn't a known-errored
+        source has made it all the way through fetch/normalize/extract-pairs
+        with nothing dropped along the way.
 
         This is the gate for trusting the pipeline enough to build on top of
         it -- e.g. CLAUDE.md's "add tests before broad crawling" extends to
         "don't widen scope (more years) until the current scope is clean."
+        A record the manifest marks ManifestStatus.ERROR (e.g. a confirmed
+        404 -- see 20230603-i-am-prey) is expected to never fetch; it must
+        not count against this forever.
         """
-        return self.discovered > 0 and self.discovered == self.fetched == self.normalized == self.parsed
+        expected = self.discovered - self.errored
+        return self.discovered > 0 and expected == self.fetched == self.normalized == self.parsed
 
 
 def build_report(records: list[ManifestRecord], *, root, year: int | None) -> AuditReport:
@@ -60,6 +70,8 @@ def build_report(records: list[ManifestRecord], *, root, year: int | None) -> Au
         # Presence in the manifest at all counts as discovered, regardless
         # of how far its status has since advanced.
         report.discovered += 1
+        if record.status is ManifestStatus.ERROR:
+            report.errored += 1
         if paths.raw_html_path(record.year, record.id, root).exists():
             report.fetched += 1
         if paths.transcript_json_path(record.year, record.id, root).exists():
@@ -78,6 +90,7 @@ def _print_report(report: AuditReport) -> None:
     scope = f"year {report.year}" if report.year is not None else "all years"
     print(f"audit: {scope}")
     print(f"  discovered pages:    {report.discovered}")
+    print(f"  errored pages:       {report.errored}")
     print(f"  fetched pages:       {report.fetched}")
     print(f"  normalized pages:    {report.normalized}")
     print(f"  parsed pages:        {report.parsed}")

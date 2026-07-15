@@ -87,6 +87,34 @@ def test_build_report_flags_missing_files_without_relying_on_status(tmp_path):
     assert report.complete is False
 
 
+def test_build_report_excludes_errored_record_from_completeness():
+    # A record the manifest marks ERROR (a confirmed-gone source page, e.g.
+    # a real 404) is never going to fetch -- it must not make the whole
+    # corpus report FAIL forever alongside records that are genuinely
+    # complete. See 20230603-i-am-prey.
+    errored = _record("gone-404", 2023, status=ManifestStatus.ERROR)
+    report = audit.build_report([errored], root="unused", year=2023)
+
+    assert report.discovered == 1
+    assert report.errored == 1
+    assert report.fetched == 0
+    assert report.complete is True
+
+
+def test_build_report_still_fails_when_a_non_errored_record_is_incomplete(tmp_path):
+    root = tmp_path / "data"
+    complete = _complete_record("a", 2007, root)
+    errored = _record("gone-404", 2007, status=ManifestStatus.ERROR)
+    incomplete = _record("b", 2007, status=ManifestStatus.DISCOVERED)
+
+    report = audit.build_report([complete, errored, incomplete], root=root, year=2007)
+
+    assert report.discovered == 3
+    assert report.errored == 1
+    assert report.fetched == 1
+    assert report.complete is False
+
+
 def _complete_record(source_id, year, root):
     record = _record(source_id, year)
     paths.ensure_parent(paths.raw_html_path(year, source_id, root)).write_text("x", encoding="utf-8")
