@@ -27,6 +27,15 @@ examples doc):
   - command (game_input): "<speaker> says|asks (to Floyd/CF/ClubFloyd), "..."
   - bot_meta: Floyd itself speaking ("Floyd says/asks ...", with or without
     an addressee), as opposed to relaying game text via "Floyd |".
+  - pagination: a MORE-prompt pause, not real game input/output -- either a
+    command to Floyd/CF whose text is exactly "space"/"push space"/"press
+    space", or the MUD emote a client sends when a user hits the pause key
+    ("<name> pushes the green 'space' button."/"<name> presses the yellow
+    enter button."). Confirmed against the real corpus at large scale
+    (~8,000 occurrences): a long game_output reply often spans several
+    MORE pages, each followed by one of these lines, so treating them as
+    ordinary command/discussion blocks fragmented a single reply into
+    several bogus command_pairs at every pause (see extract_pairs.py).
   - discussion: everything else -- human chat, MUD arrivals/actions/channel
     events, room descriptions, whispers, commands aimed at someone other
     than Floyd. This is a deliberately broad catch-all, not a last-resort
@@ -83,6 +92,28 @@ _SPEECH_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# A command sent to Floyd/CF that's purely a MORE-prompt pagination nudge,
+# not a real game command -- confirmed against the real corpus (~250
+# occurrences across 95 transcripts). Deliberately an exact-text allowlist,
+# not a "starts with space" pattern: "x space"/"examine space" is a real
+# in-game command in several games (confirmed against real transcripts,
+# e.g. data/text/2012/20120405-dinner-bell) and must not be swept in here.
+_PAGINATION_COMMAND_TEXTS = {"space", "push space", "press space"}
+
+# The MUD emote a client sends when a user hits the pause key at a MORE
+# prompt -- confirmed against the real corpus: "<name> pushes the green
+# 'space' button." / "<name> presses the yellow enter button." account for
+# ~7,900 of ~7,903 matches of this shape; the handful of other button
+# colors/objects (e.g. "pushes the left leg") look like real in-game puzzle
+# actions and are deliberately excluded by anchoring to exactly these two
+# button/verb combinations rather than a general "pushes/presses the ...
+# button" pattern.
+_PAGINATION_EMOTE_RE = re.compile(
+    r"^(?P<speaker>[A-Za-z][A-Za-z0-9 '_-]{0,29}?) "
+    r"(?:pushes the green 'space' button|presses the yellow enter button)\.?$",
+    re.IGNORECASE,
+)
+
 
 def _strip_wrapping_quotes(text: str) -> str:
     text = text.strip()
@@ -117,6 +148,14 @@ def _classify_row(raw_text: str) -> TranscriptBlock:
     if game_output_texts is not None:
         return TranscriptBlock(kind=BlockKind.GAME_OUTPUT, text="\n".join(game_output_texts))
 
+    pagination_match = _PAGINATION_EMOTE_RE.match(raw_text.strip())
+    if pagination_match:
+        return TranscriptBlock(
+            kind=BlockKind.PAGINATION,
+            speaker=pagination_match.group("speaker").strip(),
+            text=raw_text.strip(),
+        )
+
     speech_match = _SPEECH_RE.match(raw_text)
     if speech_match:
         speaker = speech_match.group("speaker").strip()
@@ -127,7 +166,10 @@ def _classify_row(raw_text: str) -> TranscriptBlock:
         if speaker.lower() == "floyd":
             kind = BlockKind.BOT_META
         elif addressee is not None and addressee.lower() in _FLOYD_ADDRESSEE_NAMES:
-            kind = BlockKind.COMMAND
+            if text.strip().lower() in _PAGINATION_COMMAND_TEXTS:
+                kind = BlockKind.PAGINATION
+            else:
+                kind = BlockKind.COMMAND
         else:
             kind = BlockKind.DISCUSSION
         return TranscriptBlock(kind=kind, speaker=speaker, addressee=addressee, text=text)
@@ -178,6 +220,8 @@ def render_transcript_txt(transcript: Transcript) -> str:
                 lines.append(f"Floyd (to {block.addressee}): {block.text}")
             else:
                 lines.append(f"Floyd: {block.text}")
+        elif block.kind == BlockKind.PAGINATION:
+            lines.append(f"{block.speaker} [pause]: {block.text}" if block.speaker else f"[pause] {block.text}")
         else:  # DISCUSSION
             lines.append(f"{block.speaker}: {block.text}" if block.speaker else block.text)
     return "\n".join(lines) + ("\n" if lines else "")

@@ -7,12 +7,20 @@ doc/club_floyd_transcript_classifier_examples.md.
 
 Pairing heuristic (from the classifier examples doc's "practical extraction
 heuristic"): each COMMAND block starts a new pair. The immediately following
-run of consecutive GAME_OUTPUT blocks is attached as that command's result;
-the run stops at the first non-GAME_OUTPUT block. A command with no
-following GAME_OUTPUT blocks (e.g. two commands sent back-to-back before
-Floyd replies, or a command as the last block in the transcript) still
-produces a pair with an empty result_blocks list -- per "invalid/unanswered
-commands are still input", it must not be dropped.
+run of consecutive GAME_OUTPUT (and PAGINATION -- see below) blocks is
+attached as that command's result; the run stops at the first block that is
+neither. A command with no following GAME_OUTPUT blocks (e.g. two commands
+sent back-to-back before Floyd replies, or a command as the last block in
+the transcript) still produces a pair with an empty result_blocks list --
+per "invalid/unanswered commands are still input", it must not be dropped.
+
+PAGINATION blocks (MORE-prompt pauses -- see normalize.py's module
+docstring) are included in a result run rather than ending it: confirmed
+against the real corpus, a long reply routinely spans several MORE pages
+with one of these pause lines between each, and treating them like an
+ordinary COMMAND/DISCUSSION boundary fragmented that single reply into
+several bogus pairs, one per pause. They stay in result_blocks (not
+dropped) so the pair still shows exactly where the pause fell.
 
 Leading game output (doc/annotated_screenshots/preamble.png +
 combat_loop_annotated.png style annotations against the real 2007-09-01
@@ -55,7 +63,9 @@ def extract_pairs(transcript: Transcript) -> list[CommandPair]:
     n = len(blocks)
 
     first_command_idx = next((idx for idx, b in enumerate(blocks) if b.kind is BlockKind.COMMAND), n)
-    leading_output = [b for b in blocks[:first_command_idx] if b.kind is BlockKind.GAME_OUTPUT]
+    leading_output = [
+        b for b in blocks[:first_command_idx] if b.kind in (BlockKind.GAME_OUTPUT, BlockKind.PAGINATION)
+    ]
     if leading_output:
         pairs.append(
             CommandPair(
@@ -76,7 +86,7 @@ def extract_pairs(transcript: Transcript) -> list[CommandPair]:
 
         result_blocks = []
         j = i + 1
-        while j < n and blocks[j].kind is BlockKind.GAME_OUTPUT:
+        while j < n and blocks[j].kind in (BlockKind.GAME_OUTPUT, BlockKind.PAGINATION):
             result_blocks.append(blocks[j])
             j += 1
 

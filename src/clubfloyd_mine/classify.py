@@ -114,7 +114,7 @@ import random
 import re
 from typing import Callable, Sequence
 
-from clubfloyd_mine.models import ClassificationSource, ClassifiedPair, CommandPair, OutcomeBucket
+from clubfloyd_mine.models import BlockKind, ClassificationSource, ClassifiedPair, CommandPair, OutcomeBucket
 
 # A callable that takes a prompt string and returns the raw LLM response
 # text. Kept as a plain type alias (not a provider client) so
@@ -442,9 +442,16 @@ def _result_lines(pair: CommandPair) -> list[str]:
     """Flatten pair.result_blocks into individual physical lines, each
     stripped and lowercased, with any embedded "Floyd |" continuation
     residue removed. See the module docstring: a single result block isn't
-    always one clean line in real data."""
+    always one clean line in real data.
+
+    PAGINATION blocks (see normalize.py/extract_pairs.py) are skipped: a
+    MORE-prompt pause line like "DavidW pushes the green 'space' button."
+    is not game text and would otherwise be fed straight into the same
+    phrase-matching rules as real output."""
     lines = []
     for block in pair.result_blocks:
+        if block.kind is BlockKind.PAGINATION:
+            continue
         for raw_line in block.text.split("\n"):
             line = _EMBEDDED_FLOYD_PREFIX_RE.sub("", raw_line).strip().lower()
             # A bare ">" prompt marker followed by real text with no
@@ -547,7 +554,11 @@ def build_llm_prompt(pair: CommandPair) -> str:
     """Build the prompt for `classify_pair_llm`. Pure/deterministic so it's
     directly testable without an LLM: given the same pair, always produces
     the same prompt text."""
-    result_lines = [block.text for block in pair.result_blocks if block.text.strip()]
+    result_lines = [
+        block.text
+        for block in pair.result_blocks
+        if block.kind is not BlockKind.PAGINATION and block.text.strip()
+    ]
     result_text = "\n".join(result_lines) if result_lines else "(no result text)"
     buckets = ", ".join(bucket.value for bucket in OutcomeBucket)
     return (

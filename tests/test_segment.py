@@ -79,6 +79,23 @@ def test_rejected_load_attempt_is_not_a_boundary():
     assert boundaries == [0, 6]
 
 
+def test_rejected_load_attempt_across_a_pagination_pause_is_still_not_a_boundary():
+    # Same as test_rejected_load_attempt_is_not_a_boundary, but the
+    # rejection message arrives after a MORE-prompt pause -- the pause must
+    # not stop the scan before it reaches the rejection marker.
+    blocks = [
+        _block(BlockKind.GAME_OUTPUT, "Would you like to RESTART, RESTORE a saved game or QUIT?"),
+        _block(BlockKind.COMMAND, "load nazimice", addressee="floyd"),
+        _block(BlockKind.PAGINATION, "maga pushes the green 'space' button.", speaker="maga"),
+        _block(BlockKind.GAME_OUTPUT, "Please give one of the answers above."),
+        _block(BlockKind.COMMAND, "quit", addressee="floyd"),
+        _block(BlockKind.COMMAND, "load nazimice", addressee="floyd"),
+        _block(BlockKind.GAME_OUTPUT, "Nazi Mice"),
+    ]
+    boundaries = segment.find_segment_boundaries(blocks)
+    assert boundaries == [0, 5]
+
+
 def test_load_command_as_last_block_with_no_following_output_is_still_treated_as_successful():
     # No following GAME_OUTPUT means _is_successful_load's scan finds no
     # rejection marker and defaults to "successful" -- exercised properly

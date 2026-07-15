@@ -75,6 +75,49 @@ def test_command_with_no_following_output_still_produces_a_pair():
     assert pairs[1].pair_index == 1
 
 
+def test_pagination_block_does_not_break_a_result_run():
+    # A MORE-prompt pause line mid-output must not fragment one command's
+    # multi-screen reply into separate pairs -- the real bug this guards
+    # against (see extract_pairs.py's module docstring).
+    transcript = Transcript(
+        source_id="x",
+        blocks=[
+            _block(BlockKind.COMMAND, "x lamp", speaker="maga", addressee="floyd"),
+            _block(BlockKind.GAME_OUTPUT, "An oil-lamp of copper and glass."),
+            _block(BlockKind.PAGINATION, "maga pushes the green 'space' button.", speaker="maga"),
+            _block(BlockKind.GAME_OUTPUT, "It is turned off."),
+            _block(BlockKind.COMMAND, "x desk", speaker="maga"),
+        ],
+    )
+    pairs = extract_pairs.extract_pairs(transcript)
+    assert len(pairs) == 2
+    assert [b.text for b in pairs[0].result_blocks] == [
+        "An oil-lamp of copper and glass.",
+        "maga pushes the green 'space' button.",
+        "It is turned off.",
+    ]
+    assert pairs[1].command_text == "x desk"
+
+
+def test_leading_output_includes_pagination_before_first_command():
+    transcript = Transcript(
+        source_id="x",
+        blocks=[
+            _block(BlockKind.GAME_OUTPUT, "NEVERMORE"),
+            _block(BlockKind.PAGINATION, "maga pushes the green 'space' button.", speaker="maga"),
+            _block(BlockKind.GAME_OUTPUT, "An Interactive Gothic"),
+            _block(BlockKind.COMMAND, "about", speaker="maga", addressee="floyd"),
+        ],
+    )
+    pairs = extract_pairs.extract_pairs(transcript)
+    assert pairs[0].is_leading_output is True
+    assert [b.text for b in pairs[0].result_blocks] == [
+        "NEVERMORE",
+        "maga pushes the green 'space' button.",
+        "An Interactive Gothic",
+    ]
+
+
 def test_bot_meta_does_not_extend_a_result_run():
     transcript = Transcript(
         source_id="x",

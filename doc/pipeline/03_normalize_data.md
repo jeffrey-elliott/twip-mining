@@ -17,6 +17,10 @@ Game/bot output:
 Bot/meta messages:
   Floyd says (to Jacqueline), "Floyd doesn't know that game."
 
+Pagination pauses (MORE-prompt, not real input/output -- see Pass 4):
+  DavidW says (to Floyd), "push space"
+  DavidW pushes the green 'space' button.
+
 The output should be boring:
 - `data/text/2025/2025-01-26-no-more/transcript.txt`
 - `data/text/2025/2025-01-26-no-more/transcript.json`

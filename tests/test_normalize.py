@@ -251,6 +251,56 @@ def test_bot_meta_without_addressee():
     assert block.addressee is None
 
 
+# --- Pagination (MORE-prompt pauses) ----------------------------------------------------
+
+
+def test_push_space_command_to_floyd_is_pagination_not_command():
+    block = _classify('DavidW says (to ClubFloyd), "push space"')
+    assert block.kind is BlockKind.PAGINATION
+    assert block.speaker == "DavidW"
+    assert block.addressee == "ClubFloyd"
+    assert block.text == "push space"
+
+
+def test_bare_space_command_to_floyd_is_pagination():
+    block = _classify('DavidW says (to Floyd), "space"')
+    assert block.kind is BlockKind.PAGINATION
+
+
+def test_press_space_command_to_cf_is_pagination():
+    block = _classify('Jacqueline says (to CF), "press space"')
+    assert block.kind is BlockKind.PAGINATION
+
+
+def test_examine_space_command_is_not_pagination():
+    # Real example: data/text/2012/20120405-dinner-bell -- "x space" is a
+    # real in-game "examine space" command, not a MORE-prompt nudge, so it
+    # must stay a normal COMMAND.
+    block = _classify('DavidW says (to floyd), "x space"')
+    assert block.kind is BlockKind.COMMAND
+    assert block.text == "x space"
+
+
+def test_pushes_green_space_button_emote_is_pagination():
+    block = _classify("DavidW pushes the green 'space' button.")
+    assert block.kind is BlockKind.PAGINATION
+    assert block.speaker == "DavidW"
+    assert block.text == "DavidW pushes the green 'space' button."
+
+
+def test_presses_yellow_enter_button_emote_is_pagination():
+    block = _classify("Knight_Otu presses the yellow enter button.")
+    assert block.kind is BlockKind.PAGINATION
+    assert block.speaker == "Knight_Otu"
+
+
+def test_pushes_other_button_emote_is_not_pagination():
+    # A one-off in-game puzzle action ("pushes the left leg ...") is not a
+    # MORE-prompt nudge and must not be swept into pagination.
+    block = _classify("DavidW pushes the left leg of the statue.")
+    assert block.kind is BlockKind.DISCUSSION
+
+
 # --- Full fixture parse ----------------------------------------------------------------
 
 

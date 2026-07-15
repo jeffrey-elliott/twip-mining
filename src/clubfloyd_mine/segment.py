@@ -58,10 +58,11 @@ def _is_successful_load(blocks: list[TranscriptBlock], command_index: int) -> bo
     """Whether the "load X" command at `command_index` actually started a
     new game, rather than being rejected by the previous game's still-open
     RESTART/RESTORE/QUIT menu. Checks the same immediately-following
-    GAME_OUTPUT run extract_pairs.py would attach to this command as its
-    result."""
+    GAME_OUTPUT/PAGINATION run extract_pairs.py would attach to this
+    command as its result -- a PAGINATION block (MORE-prompt pause) doesn't
+    end the run, same as it doesn't end extract_pairs's result run."""
     for block in blocks[command_index + 1 :]:
-        if block.kind is not BlockKind.GAME_OUTPUT:
+        if block.kind not in (BlockKind.GAME_OUTPUT, BlockKind.PAGINATION):
             break
         if _REJECTED_LOAD_MARKER in block.text.strip().lower():
             return False

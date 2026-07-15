@@ -422,6 +422,45 @@ def test_game_specific_reimplemented_failure_message_is_uncertain():
     assert classify.classify_pair_rule(pair) is None
 
 
+# --- pagination blocks are excluded from result-line matching ------------------------
+
+
+def test_pagination_block_text_is_ignored_by_rule_classifier():
+    # A MORE-prompt pause mixed into result_blocks (see extract_pairs.py)
+    # must not feed into the phrase-matching rules as if it were real game
+    # text.
+    pair = CommandPair(
+        source_id="x",
+        pair_index=0,
+        command_text="look",
+        result_blocks=[
+            TranscriptBlock(kind=BlockKind.GAME_OUTPUT, text=" You can't see any such thing."),
+            TranscriptBlock(
+                kind=BlockKind.PAGINATION,
+                speaker="maga",
+                text="maga pushes the green 'space' button.",
+            ),
+        ],
+    )
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.PARSER_FAILURE
+
+
+def test_pagination_only_result_is_uncertain_not_falsely_matched():
+    pair = CommandPair(
+        source_id="x",
+        pair_index=0,
+        command_text="look",
+        result_blocks=[
+            TranscriptBlock(
+                kind=BlockKind.PAGINATION,
+                speaker="maga",
+                text="maga pushes the green 'space' button.",
+            ),
+        ],
+    )
+    assert classify.classify_pair_rule(pair) is None
+
+
 # --- against the real Nevermore fixture ----------------------------------------------
 
 

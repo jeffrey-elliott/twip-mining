@@ -66,7 +66,7 @@ Each pass reads from and writes to well-defined paths. All passes must be restar
 }
 ```
 
-**Normalized block kinds**: `discussion`, `command` (to Floyd), `game_output`, `bot_meta`
+**Normalized block kinds**: `discussion`, `command` (to Floyd), `game_output`, `bot_meta`, `pagination` (MORE-prompt pause, e.g. "push space"/"DavidW pushes the green 'space' button." -- does not break a command's result run in Pass 4)
 
 **Outcome buckets** (Pass 5): `success`, `parser_failure`, `world_failure`, `disambiguation`, `clarification`, `inventory_change`, `location_change`, `score_or_end_state`, `meta_or_floyd_control`, `unknown`
 

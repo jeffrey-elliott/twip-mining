@@ -59,6 +59,18 @@ class BlockKind(str, Enum):
     COMMAND = "command"
     GAME_OUTPUT = "game_output"
     BOT_META = "bot_meta"
+    # A MORE-prompt pagination pause: either a command sent to Floyd/CF
+    # whose text is literally "space"/"push space"/"press space", or the
+    # MUD emote a client sends when a user hits the pause key ("<name>
+    # pushes the green 'space' button." / "<name> presses the yellow enter
+    # button."). Confirmed against the real corpus: ~8,000 occurrences
+    # across hundreds of transcripts, one for nearly every screen of a
+    # long game_output that needed more than one MORE page. Classified
+    # separately from COMMAND/DISCUSSION so extract_pairs can see through
+    # it without treating it as ending a command's result run -- otherwise
+    # a single reply spanning several MORE pages was silently fragmented
+    # into multiple bogus pairs at every pause.
+    PAGINATION = "pagination"
 
 
 class TranscriptBlock(BaseModel):
