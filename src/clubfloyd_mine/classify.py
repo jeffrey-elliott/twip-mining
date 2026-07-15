@@ -367,6 +367,18 @@ _META_COMMANDS = {
     "save",
 }
 
+# doc/pipeline/03_normalize_data.md's own example ("load sleepmask nomore"):
+# `load USER GAME` is ClubFloyd's own session-control command for swapping in
+# a whole new game -- not a physical world action, same category as
+# restart/restore/undo/save above. Unlike those, it always carries two
+# dynamic arguments (the requesting user's name and the game's title), so it
+# can't be matched as an exact command in _META_COMMANDS; matched by prefix
+# instead. Whatever follows is the *new* game's own preamble (title banner,
+# content warning, opening room text) -- entirely game-specific, exactly like
+# restart's game-banner result in death.md's own canonical example -- so
+# there is no result-text phrase to check here, only the command verb.
+_META_PREFIXES = ("load ",)
+
 # doc/classification/examples/ask.md: `ask ACTOR about/for/to ...` is always
 # a recognized conversation attempt when this shape appears -- actor-not-
 # present or topic-not-understood failures are generic phrases already
@@ -486,7 +498,7 @@ def classify_pair_rule(pair: CommandPair) -> OutcomeBucket | None:
             return OutcomeBucket.SUCCESS
 
     command = pair.command_text.strip().lower()
-    if command in _META_COMMANDS:
+    if command in _META_COMMANDS or command.startswith(_META_PREFIXES):
         return OutcomeBucket.META_OR_FLOYD_CONTROL
     if command in _MOVEMENT_COMMANDS or command.startswith(_MOVEMENT_PREFIXES):
         return OutcomeBucket.LOCATION_CHANGE

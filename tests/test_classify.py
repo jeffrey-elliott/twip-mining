@@ -597,6 +597,15 @@ def test_save_command_is_meta_or_floyd_control():
     assert classify.classify_pair_rule(pair) is OutcomeBucket.META_OR_FLOYD_CONTROL
 
 
+def test_load_command_is_meta_or_floyd_control():
+    pair = _pair(
+        " ***CONTENT WARNING***",
+        " This is a POLITICAL story...",
+        command_text="load sleepmask traintopiccadilly",
+    )
+    assert classify.classify_pair_rule(pair) is OutcomeBucket.META_OR_FLOYD_CONTROL
+
+
 def test_ask_actor_about_topic_with_no_reply_is_success():
     # ask.md: "There is no reply." is not chatter or an unknown-command
     # result -- it's evidence the command landed, same bucket as a reply.
